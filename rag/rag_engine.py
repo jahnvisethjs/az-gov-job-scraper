@@ -1,6 +1,6 @@
 """
 RAG Engine for semantic job matching using:
-- Gemini embedding-001 for vector embeddings (ASU AI doesn't support embeddings yet)
+- ASU AI text-embedding-3-small for vector embeddings (1024 dimensions)
 - ASU AI GPT-4o for text generation (resume parsing, tailoring advice)
 - ChromaDB for vector storage and similarity search
 """
@@ -166,7 +166,7 @@ class JobRAG:
         if not self.api_key:
             raise ValueError("ASU AI API key is required")
         
-        # Initialize ASU AI provider for text generation
+        # Initialize ASU AI provider for both text generation AND embeddings
         self.llm_provider = ASUAIProvider(api_key=self.api_key)
         
         # Initialize ChromaDB
@@ -186,10 +186,10 @@ class JobRAG:
     
     def generate_embedding(self, text: str) -> List[float]:
         """
-        Generate embedding using Google Gemini embedding-001.
+        Generate embedding using ASU AI text-embedding-3-small.
         
-        Note: ASU AI doesn't support embeddings yet, so we use Gemini's free tier.
-        ASU AI is still used for text generation (resume parsing, advice).
+        Uses ASU AI embeddings API with OpenAI's text-embedding-3-small model
+        configured for 1024 dimensions.
         
         This is synchronous to work within Streamlit's event loop.
         
@@ -197,29 +197,17 @@ class JobRAG:
             text: Text to embed
             
         Returns:
-            Embedding vector (768 dimensions)
+            Embedding vector (1024 dimensions)
         """
-        try:
-            import google.generativeai as genai
-            
-            # Configure Gemini with API key
-            gemini_key = os.getenv("GEMINI_API_KEY")
-            if not gemini_key:
-                raise ValueError("GEMINI_API_KEY is required for embeddings")
-            
-            genai.configure(api_key=gemini_key)
-            
-            # Generate embedding using Gemini (synchronous call)
-            result = genai.embed_content(
-                model="models/embedding-001",
-                content=text,
-                task_type="retrieval_document"
-            )
-            
-            return result["embedding"]
-            
-        except ImportError:
-            raise ImportError("google-generativeai is required. Install with: pip install google-generativeai")
+        from config import ASU_AI_EMBEDDINGS_MODEL, ASU_AI_EMBEDDINGS_PROVIDER, ASU_AI_EMBEDDINGS_DIMENSIONS
+        
+        # Use ASU AI embeddings (synchronous call)
+        return self.llm_provider.generate_embedding_sync(
+            text=text,
+            model=ASU_AI_EMBEDDINGS_MODEL,
+            provider=ASU_AI_EMBEDDINGS_PROVIDER,
+            dimensions=ASU_AI_EMBEDDINGS_DIMENSIONS
+        )
     
     def generate_embedding_sync(self, text: str) -> List[float]:
         """Alias for generate_embedding (already synchronous)."""
@@ -257,8 +245,20 @@ class JobRAG:
             job_id = job.get("job_id") or f"{job['city']}_{i}"
             ids.append(job_id)
             
-            # Store metadata (all job fields)
-            metadatas.append(job)
+            # Flatten metadata - ChromaDB doesn't support nested dicts
+            metadata = {}
+            for key, value in job.items():
+                if isinstance(value, dict):
+                    # Convert nested dict to JSON string
+                    import json
+                    metadata[key] = json.dumps(value)
+                elif isinstance(value, (str, int, float, bool)) or value is None:
+                    metadata[key] = value
+                else:
+                    # Convert other types to string
+                    metadata[key] = str(value)
+            
+            metadatas.append(metadata)
         
         # Add to ChromaDB
         self.collection.add(

@@ -29,7 +29,7 @@ from config import (
     DEGREE_OPTIONS,
     MAX_RESUME_SIZE_MB,
     SUPPORTED_RESUME_FORMATS,
-    GEMINI_API_KEY
+    ASU_AI_API_KEY
 )
 
 # Load environment variables
@@ -59,12 +59,12 @@ def main():
     st.markdown('<div class="sub-header">AI-Powered Job Matching for Arizona Cities & Counties</div>', unsafe_allow_html=True)
     
     # Check for API key
-    api_key = os.getenv("GEMINI_API_KEY") or GEMINI_API_KEY
+    api_key = os.getenv("ASU_AI_API_KEY") or ASU_AI_API_KEY
     if not api_key:
-        st.error("⚠️ **Gemini API Key not found!**")
-        st.info("Please create a `.env` file with your `GEMINI_API_KEY` or set it in `config.py`")
-        st.code("GEMINI_API_KEY=your_api_key_here", language="bash")
-        st.markdown("[Get a free API key from Google AI Studio](https://makersuite.google.com/app/apikey)")
+        st.error("⚠️ **ASU AI API Key not found!**")
+        st.info("Please create a `.env` file with your `ASU_AI_API_KEY` or set it in `config.py`")
+        st.code("ASU_AI_API_KEY=your_api_key_here", language="bash")
+        st.markdown("[Contact Ayat Sweid or Paul Alvarado for ASU AI API access](https://platform.aiml.asu.edu)")
         st.stop()
     
     # Apply dynamic CSS based on theme
@@ -434,7 +434,7 @@ def main():
         from scrapers import ScraperRegistry
         
         available_cities = ScraperRegistry.get_supported_cities()
-        selected_cities = available_cities[1:2]  # Search all cities by default
+        selected_cities = available_cities  # Search all cities by default
         
         # Show info about cities being searched
         st.info(f"🔍 Searching {len(selected_cities)} Arizona cities: {', '.join(selected_cities[:5])}{'...' if len(selected_cities) > 5 else ''}")
@@ -473,17 +473,45 @@ def main():
                     # Log to console as well for debugging
                     print(f"[JobMatcher] {message}")
                 
+                
                 # Initialize job matcher
                 matcher = JobMatcher(api_key)
                 
-                # Run matching workflow
-                matched_jobs = asyncio.run(
-                    matcher.match_jobs_to_profile(
-                        profile=get_user_profile(),
-                        cities=selected_cities,
-                        progress_callback=update_progress
-                    )
-                )
+                # Run matching workflow with proper async handling for Streamlit
+                import nest_asyncio
+                nest_asyncio.apply()
+                
+                # Use ThreadPoolExecutor to run async code in Streamlit
+                import concurrent.futures
+                import asyncio
+                
+                # IMPORTANT: Capture profile BEFORE entering thread (session state not accessible in threads)
+                user_profile = get_user_profile()
+                
+                # Create thread-safe progress callback (can't update Streamlit UI from thread)
+                def thread_safe_progress(message: str):
+                    # Only log to console, can't update Streamlit UI from thread
+                    print(f"[JobMatcher] {message}")
+                
+                def run_async_match():
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        return loop.run_until_complete(
+                            matcher.match_jobs_to_profile(
+                                profile=user_profile,  # Use captured profile
+                                cities=selected_cities,
+                                progress_callback=thread_safe_progress  # Thread-safe callback
+                            )
+                        )
+                    finally:
+                        loop.close()
+                
+                # Show a simple progress message
+                status_container.info("⏳ Searching for matching jobs... (check terminal for progress)")
+                
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    matched_jobs = pool.submit(run_async_match).result()
                 
                 # Store results
                 from utils import store_matched_jobs

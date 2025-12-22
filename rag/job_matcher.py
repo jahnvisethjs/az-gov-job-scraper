@@ -2,14 +2,12 @@
 Job Matcher and Tailoring Advisor for personalized job recommendations.
 """
 from typing import List, Dict, Tuple
-import google.generativeai as genai
 from .rag_engine import JobRAG
 from scrapers import ScraperRegistry
 import asyncio
 import os
 from config import (
-    GEMINI_API_KEY,
-    GEMINI_MODEL,
+    ASU_AI_API_KEY,
     TOP_JOBS_TO_DISPLAY
 )
 
@@ -22,9 +20,9 @@ class JobMatcher:
         Initialize job matcher.
         
         Args:
-            api_key: Gemini API key (defaults to config)
+            api_key: ASU AI API key (defaults to config)
         """
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY") or GEMINI_API_KEY
+        self.api_key = api_key or os.getenv("ASU_AI_API_KEY") or ASU_AI_API_KEY
         self.rag_engine = JobRAG(api_key=self.api_key)
     
     async def match_jobs_to_profile(
@@ -127,18 +125,20 @@ class JobMatcher:
 
 
 class TailoringAdvisor:
-    """Generate personalized resume tailoring advice using Gemini."""
+    """Generate personalized resume tailoring advice using ASU AI."""
     
     def __init__(self, api_key: str = None):
         """
         Initialize tailoring advisor.
         
-        Args:
-            api_key: Gemini API key (defaults to config)
+Args:
+            api_key: ASU AI API key (defaults to config)
         """
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY") or GEMINI_API_KEY
-        genai.configure(api_key=self.api_key)
-        self.model = genai.GenerativeModel(GEMINI_MODEL)
+        from config import ASU_AI_API_KEY, ASU_AI_MODEL
+        from .asu_ai_provider import ASUAIProvider
+        
+        self.api_key = api_key or os.getenv("ASU_AI_API_KEY") or ASU_AI_API_KEY
+        self.provider = ASUAIProvider(api_key=self.api_key, model=ASU_AI_MODEL)
     
     def generate_advice(self, job: Dict, profile: Dict) -> Dict[str, any]:
         """
@@ -153,7 +153,7 @@ class TailoringAdvisor:
             {
                 "skill_gaps": List of missing skills,
                 "keywords": List of keywords to add,
-                "improvements": List of improvement suggestions,
+               "improvements": List of improvement suggestions,
                 "strengths": List of matching strengths
             }
         """
@@ -193,11 +193,13 @@ Format your response as JSON:
 """
         
         try:
-            response = self.model.generate_content(prompt)
-            text = response.text.strip()
+            # Use ASU AI provider (synchronous)
+            response_text = self.provider.generate_content_sync(prompt)
             
             # Extract JSON from response
-            # Remove markdown code blocks if present
+            text = response_text.strip()
+            
+           # Remove markdown code blocks if present
             if "```json" in text:
                 text = text.split("```json")[1].split("```")[0].strip()
             elif "```" in text:
