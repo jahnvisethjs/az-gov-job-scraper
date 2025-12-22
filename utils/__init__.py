@@ -14,7 +14,7 @@ from .session_manager import (
     clear_session,
     get_session_age
 )
-from .rate_limiter import GeminiRateLimiter, get_rate_limiter
+
 
 __all__ = [
     "ResumeExtractor",
@@ -30,6 +30,5 @@ __all__ = [
     "is_processing",
     "clear_session",
     "get_session_age",
-    "GeminiRateLimiter",
-    "get_rate_limiter"
+
 ]

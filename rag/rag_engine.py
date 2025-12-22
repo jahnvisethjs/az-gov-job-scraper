@@ -1,5 +1,8 @@
 """
-RAG Engine for semantic job matching using ChromaDB and ASU AI (OpenAI embeddings + gpt-4o).
+RAG Engine for semantic job matching using:
+- Gemini embedding-001 for vector embeddings (ASU AI doesn't support embeddings yet)
+- ASU AI GPT-4o for text generation (resume parsing, tailoring advice)
+- ChromaDB for vector storage and similarity search
 """
 import chromadb
 from chromadb.config import Settings
@@ -181,45 +184,46 @@ class JobRAG:
             metadata={"hnsw:space": "cosine"}  # Use cosine similarity
         )
     
-    async def generate_embedding(self, text: str) -> List[float]:
+    def generate_embedding(self, text: str) -> List[float]:
         """
-        Generate embedding using OpenAI text-embedding-3-small via ASU AI.
+        Generate embedding using Google Gemini embedding-001.
+        
+        Note: ASU AI doesn't support embeddings yet, so we use Gemini's free tier.
+        ASU AI is still used for text generation (resume parsing, advice).
+        
+        This is synchronous to work within Streamlit's event loop.
         
         Args:
             text: Text to embed
             
         Returns:
-            Embedding vector
+            Embedding vector (768 dimensions)
         """
-        url = f"{self.base_url}/embeddings"  # Use /embeddings endpoint
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        # ASU AI embeddings format
-        payload = {
-            "query": text,  # Use 'query' not 'input'
-            "embeddings_provider": "openai",
-            "embeddings_model": "te3s"  # te3s = text-embedding-3-small
-        }
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                response.raise_for_status()
-                result = await response.json()
-                
-                # ASU AI returns embeddings directly in the response
-                if "embeddings" in result:
-                    return result["embeddings"]
-                elif isinstance(result, list):
-                    return result
-                else:
-                    raise ValueError(f"Unexpected embedding response: {result}")
+        try:
+            import google.generativeai as genai
+            
+            # Configure Gemini with API key
+            gemini_key = os.getenv("GEMINI_API_KEY")
+            if not gemini_key:
+                raise ValueError("GEMINI_API_KEY is required for embeddings")
+            
+            genai.configure(api_key=gemini_key)
+            
+            # Generate embedding using Gemini (synchronous call)
+            result = genai.embed_content(
+                model="models/embedding-001",
+                content=text,
+                task_type="retrieval_document"
+            )
+            
+            return result["embedding"]
+            
+        except ImportError:
+            raise ImportError("google-generativeai is required. Install with: pip install google-generativeai")
     
     def generate_embedding_sync(self, text: str) -> List[float]:
-        """Synchronous wrapper for generate_embedding."""
-        return asyncio.run(self.generate_embedding(text))
+        """Alias for generate_embedding (already synchronous)."""
+        return self.generate_embedding(text)
     
     def add_jobs(self, jobs: List[Dict]) -> int:
         """

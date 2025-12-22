@@ -21,8 +21,7 @@ from utils import (
     get_user_profile,
     is_profile_complete,
     ResumeExtractor,
-    validate_resume_size,
-    get_rate_limiter
+    validate_resume_size
 )
 from rag import ResumeParser
 from config import (
@@ -540,16 +539,7 @@ def main():
             for i, job in enumerate(filtered_jobs):
                 display_job_card(job, i, api_key)
         
-        # Show rate limiter stats
-        with st.expander("⚙️ API Usage Stats"):
-            rate_limiter = get_rate_limiter()
-            stats = rate_limiter.get_stats()
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Requests (Last Minute)", f"{stats['requests_last_minute']}/{stats['rpm_limit']}")
-            with col2:
-                st.metric("Requests (Today)", f"{stats['requests_today']}/{stats['rpd_limit']}")
+
 
 
 def display_job_card(job: Dict, index: int, api_key: str):
