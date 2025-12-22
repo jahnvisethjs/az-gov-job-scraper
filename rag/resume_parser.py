@@ -1,27 +1,31 @@
 """
-Resume parser using Gemini AI to extract structured data from resume text.
+Resume parser using ASU AI (gpt-4o) to extract structured data from resume text.
 """
 import json
-from typing import Dict, Optional
-import google.generativeai as genai
-from utils.rate_limiter import get_rate_limiter
+from typing import Dict
 import asyncio
+import os
+import sys
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from rag.asu_ai_provider import ASUAIProvider
 
 
 class ResumeParser:
-    """Parse resume text into structured data using Gemini."""
+    """Parse resume text into structured data using ASU AI (gpt-4o)."""
     
-    def __init__(self, api_key: str, model_name: str = "gemini-2.5-flash"):
+    def __init__(self, api_key: str = None, model_name: str = "gpt-4o"):
         """
-        Initialize resume parser with Gemini API.
+        Initialize resume parser with ASU AI.
         
         Args:
-            api_key: Gemini API key
-            model_name: Gemini model to use
+            api_key: ASU AI API key (optional, uses environment variable if not provided)
+            model_name: Model to use (default: gpt-4o)
         """
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(model_name)
-        self.rate_limiter = get_rate_limiter()
+        self.provider = ASUAIProvider(api_key=api_key, model=model_name)
+        self.model_name = model_name
     
     async def parse_resume(self, resume_text: str) -> Dict:
         """
@@ -55,9 +59,6 @@ class ResumeParser:
                 "summary": str
             }
         """
-        # Wait for rate limit
-        await self.rate_limiter.wait_if_needed()
-        
         prompt = f"""
 You are a resume parser. Extract structured information from this resume.
 
@@ -107,10 +108,10 @@ Return ONLY the JSON object:
 """
         
         try:
-            response = await self.model.generate_content_async(prompt)
+            response = await self.provider.generate_content(prompt)
             
             # Extract JSON from response
-            response_text = response.text.strip()
+            response_text = response.strip()
             
             # Remove markdown code blocks if present
             if response_text.startswith("```"):
@@ -158,3 +159,20 @@ Return ONLY the JSON object:
     def parse_resume_sync(self, resume_text: str) -> Dict:
         """Synchronous wrapper for parse_resume."""
         return asyncio.run(self.parse_resume(resume_text))
+
+
+# Legacy function for backward compatibility
+def parse_resume(resume_text: str, api_key: str = None) -> Dict:
+    """
+    Parse resume (legacy function for backward compatibility).
+    
+    Args:
+        resume_text: Resume text to parse
+        api_key: ASU AI API key
+        
+    Returns:
+        Parsed resume dictionary
+    """
+    parser = ResumeParser(api_key=api_key)
+    return parser.parse_resume_sync(resume_text)
+

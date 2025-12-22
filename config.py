@@ -4,7 +4,14 @@ Configuration file for Arizona city job sites and application settings.
 import os
 from typing import List, Dict
 
-# API Configuration
+# =============================================================================
+# LLM Provider Configuration
+# =============================================================================
+
+# LLM Provider Selection: "asu_ai" (default) or "gemini"
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "asu_ai")
+
+# Gemini API Configuration (legacy)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 # Rate Limiting (Gemini Free Tier)
@@ -12,9 +19,16 @@ GEMINI_RPM = 15  # Requests per minute
 GEMINI_RPD = 1500  # Requests per day
 GEMINI_TPD = 1_000_000  # Tokens per day
 
-# Model Configuration
-GEMINI_MODEL = "gemini-2.5-flash"  # Fixed: was "gemini-1.5-flash"
+# Gemini Model Configuration
+GEMINI_MODEL = "gemini-2.5-flash"
 GEMINI_EMBEDDING_MODEL = "models/embedding-001"
+
+# ASU AI Platform Configuration (Primary Provider)
+ASU_AI_ENABLED = os.getenv("ASU_AI_ENABLED", "true").lower() == "true"
+ASU_AI_API_KEY = os.getenv("ASU_AI_API_KEY", "")
+ASU_AI_BASE_URL = os.getenv("ASU_AI_BASE_URL", "https://api-main.aiml.asu.edu")
+ASU_AI_MODEL = os.getenv("ASU_AI_MODEL", "gpt-4o")
+ASU_AI_EMBEDDING_MODEL = "text-embedding-3-small"  # OpenAI embeddings via ASU AI
 
 # Arizona City Job Sites
 ARIZONA_CITIES: List[Dict[str, str]] = [

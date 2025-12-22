@@ -41,7 +41,7 @@ async def list_tools() -> List[Tool]:
                     },
                     "api_key": {
                         "type": "string",
-                        "description": "Gemini API key (optional, uses environment variable if not provided)"
+                        "description": "ASU AI API key (optional, uses environment variable if not provided)"
                     }
                 },
                 "required": ["resume_text"]
@@ -59,7 +59,7 @@ async def list_tools() -> List[Tool]:
                     },
                     "api_key": {
                         "type": "string",
-                        "description": "Gemini API key (optional)"
+                        "description": "ASU AI API key (optional)"
                     }
                 },
                 "required": ["resume_text"]
@@ -77,7 +77,7 @@ async def list_tools() -> List[Tool]:
                     },
                     "api_key": {
                         "type": "string",
-                        "description": "Gemini API key (optional)"
+                        "description": "ASU AI API key (optional)"
                     }
                 },
                 "required": ["resume_text"]
@@ -91,13 +91,13 @@ async def call_tool(name: str, arguments: dict) -> List[TextContent]:
     """Handle tool calls."""
     
     resume_text = arguments.get("resume_text", "")
-    api_key = arguments.get("api_key", os.getenv("GEMINI_API_KEY"))
+    api_key = arguments.get("api_key", os.getenv("ASU_AI_API_KEY"))
     
     if not api_key:
         return [TextContent(
             type="text",
             text=json.dumps({
-                "error": "API key required. Provide via 'api_key' parameter or GEMINI_API_KEY environment variable."
+                "error": "API key required. Provide via 'api_key' parameter or ASU_AI_API_KEY environment variable."
             }, indent=2)
         )]
     
@@ -161,5 +161,6 @@ async def main():
         )
 
 
-if __name__ == "__main__":
+if __name == "__main__":
     asyncio.run(main())
+

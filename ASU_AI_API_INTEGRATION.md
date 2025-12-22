@@ -123,13 +123,14 @@ class ASUAIProvider(LLMProvider):
 
 ```python
 # ASU AI Platform Configuration
-ASU_AI_ENABLED = os.getenv("ASU_AI_ENABLED", "false").lower() == "true"
+ASU_AI_ENABLED = os.getenv("ASU_AI_ENABLED", "true").lower() == "true"
 ASU_AI_API_KEY = os.getenv("ASU_AI_API_KEY", "")
 ASU_AI_BASE_URL = os.getenv("ASU_AI_BASE_URL", "https://api-main-beta.aiml.asu.edu")
-ASU_AI_MODEL = os.getenv("ASU_AI_MODEL", "gpt-4")  # Adjust based on available models
+ASU_AI_MODEL = os.getenv("ASU_AI_MODEL", "gpt-4o")  # Adjust based on available models
+ASU_AI_EMBEDDING_MODEL = "text-embedding-3-small"
 
 # LLM Provider (gemini or asu_ai)
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "asu_ai")
 ```
 
 **Update `.env.example`:**

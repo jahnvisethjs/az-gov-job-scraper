@@ -1,18 +1,20 @@
 """
-RAG Engine for semantic job matching using ChromaDB and Google Gemini embeddings.
+RAG Engine for semantic job matching using ChromaDB and ASU AI (OpenAI embeddings + gpt-4o).
 """
 import chromadb
 from chromadb.config import Settings
 from typing import List, Dict, Optional, Tuple
-import google.generativeai as genai
+import asyncio
+import aiohttp
 from config import (
-    GEMINI_API_KEY,
-    GEMINI_EMBEDDING_MODEL,
+    ASU_AI_API_KEY,
+    ASU_AI_BASE_URL,
     VECTOR_DB_PATH,
     MIN_MATCH_SCORE_THRESHOLD
 )
 import os
 from pathlib import Path
+from rag.asu_ai_provider import ASUAIProvider
 
 
 def prepare_job_text(job: Dict) -> str:
@@ -146,22 +148,23 @@ def calculate_keyword_overlap(job: Dict, profile: Dict) -> float:
 
 
 class JobRAG:
-    """RAG engine for semantic job matching."""
+    """RAG engine for semantic job matching using ASU AI."""
     
     def __init__(self, api_key: Optional[str] = None):
         """
-        Initialize RAG engine with ChromaDB and Gemini.
+        Initialize RAG engine with ChromaDB and ASU AI.
         
         Args:
-            api_key: Gemini API key (defaults to config)
+            api_key: ASU AI API key (defaults to config or environment)
         """
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY") or GEMINI_API_KEY
+        self.api_key = api_key or os.getenv("ASU_AI_API_KEY") or ASU_AI_API_KEY
+        self.base_url = ASU_AI_BASE_URL
         
         if not self.api_key:
-            raise ValueError("Gemini API key is required")
+            raise ValueError("ASU AI API key is required")
         
-        # Configure Gemini
-        genai.configure(api_key=self.api_key)
+        # Initialize ASU AI provider for text generation
+        self.llm_provider = ASUAIProvider(api_key=self.api_key)
         
         # Initialize ChromaDB
         db_path = Path(VECTOR_DB_PATH)
@@ -178,9 +181,9 @@ class JobRAG:
             metadata={"hnsw:space": "cosine"}  # Use cosine similarity
         )
     
-    def generate_embedding(self, text: str) -> List[float]:
+    async def generate_embedding(self, text: str) -> List[float]:
         """
-        Generate embedding using Gemini.
+        Generate embedding using OpenAI text-embedding-3-small via ASU AI.
         
         Args:
             text: Text to embed
@@ -188,12 +191,35 @@ class JobRAG:
         Returns:
             Embedding vector
         """
-        result = genai.embed_content(
-            model=GEMINI_EMBEDDING_MODEL,
-            content=text,
-            task_type="retrieval_document"
-        )
-        return result["embedding"]
+        url = f"{self.base_url}/embeddings"  # Use /embeddings endpoint
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # ASU AI embeddings format
+        payload = {
+            "query": text,  # Use 'query' not 'input'
+            "embeddings_provider": "openai",
+            "embeddings_model": "te3s"  # te3s = text-embedding-3-small
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                response.raise_for_status()
+                result = await response.json()
+                
+                # ASU AI returns embeddings directly in the response
+                if "embeddings" in result:
+                    return result["embeddings"]
+                elif isinstance(result, list):
+                    return result
+                else:
+                    raise ValueError(f"Unexpected embedding response: {result}")
+    
+    def generate_embedding_sync(self, text: str) -> List[float]:
+        """Synchronous wrapper for generate_embedding."""
+        return asyncio.run(self.generate_embedding(text))
     
     def add_jobs(self, jobs: List[Dict]) -> int:
         """
@@ -220,7 +246,7 @@ class JobRAG:
             documents.append(job_text)
             
             # Generate embedding
-            embedding = self.generate_embedding(job_text)
+            embedding = self.generate_embedding_sync(job_text)
             embeddings.append(embedding)
             
             # Create unique ID
@@ -259,7 +285,7 @@ class JobRAG:
         resume_text = prepare_resume_text(profile)
         
         # Generate embedding for resume
-        resume_embedding = self.generate_embedding(resume_text)
+        resume_embedding = self.generate_embedding_sync(resume_text)
         
         # Query ChromaDB
         results = self.collection.query(
