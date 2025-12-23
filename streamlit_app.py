@@ -412,20 +412,6 @@ def main():
         
         st.success("✅ **Profile Complete!** Ready to find matching jobs.")
         
-        # Display profile summary
-        st.markdown("### 👤 Your Profile")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown(f"**Name:** {profile['name']}")
-            st.markdown(f"**Education:** {profile['degree']}")
-            st.markdown(f"**Resume:** {profile['resume_filename']}")
-        
-        with col2:
-            st.markdown(f"**Interests:** {', '.join(profile['interests'])}")
-        
-        st.markdown("---")
-        
         # Job scraping and matching (Phase 3)
         st.markdown("### 🔍 Find Matching Jobs")
         
