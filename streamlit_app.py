@@ -536,7 +536,7 @@ def main():
             "Min Score",
             min_value=0,
             max_value=100,
-            value=st.session_state.get("min_score_val", 60),
+            value=st.session_state.get("min_score_val", 25),
             step=5,
             key="min_score_val"
         )
