@@ -14,6 +14,16 @@ from .session_manager import (
     clear_session,
     get_session_age
 )
+from .job_cache import (
+    is_cache_fresh,
+    get_cached_jobs,
+    save_cached_jobs,
+    clear_cache,
+    get_cache_summary,
+    get_cache_age,
+    get_cached_resume_parse,
+    save_cached_resume_parse
+)
 
 
 __all__ = [
@@ -30,5 +40,13 @@ __all__ = [
     "is_processing",
     "clear_session",
     "get_session_age",
-
+    "is_cache_fresh",
+    "get_cached_jobs",
+    "save_cached_jobs",
+    "clear_cache",
+    "get_cache_summary",
+    "get_cache_age",
+    "get_cached_resume_parse",
+    "save_cached_resume_parse",
 ]
+

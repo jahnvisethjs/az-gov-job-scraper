@@ -8,12 +8,13 @@ import chromadb
 from chromadb.config import Settings
 from typing import List, Dict, Optional, Tuple
 import asyncio
-import aiohttp
+import hashlib
 from config import (
     ASU_AI_API_KEY,
     ASU_AI_BASE_URL,
     VECTOR_DB_PATH,
-    MIN_MATCH_SCORE_THRESHOLD
+    MIN_MATCH_SCORE_THRESHOLD,
+    EMBEDDING_BATCH_WORKERS
 )
 import os
 from pathlib import Path
@@ -120,8 +121,6 @@ def calculate_keyword_overlap(job: Dict, profile: Dict) -> float:
         Keyword overlap score (0.0 to 1.0)
     """
     # Extract keywords from job
-    job_keywords = set()
-    
     job_text = f"{job.get('title', '')} {job.get('description', '')} {job.get('requirements', '')}".lower()
     
     # Extract keywords from profile
@@ -136,18 +135,24 @@ def calculate_keyword_overlap(job: Dict, profile: Dict) -> float:
     if profile.get("interests"):
         profile_keywords.update([i.lower() for i in profile["interests"]])
     
-    # Simple keyword matching (can be improved with NLP)
-    matches = 0
+    # Simple keyword matching
     total_keywords = len(profile_keywords)
     
     if total_keywords == 0:
         return 0.0
     
-    for keyword in profile_keywords:
-        if keyword in job_text:
-            matches += 1
+    matches = sum(1 for keyword in profile_keywords if keyword in job_text)
     
     return matches / total_keywords
+
+
+def _compute_jobs_hash(jobs: List[Dict]) -> str:
+    """Compute a content hash for a list of jobs to detect changes."""
+    job_ids = sorted([
+        j.get("job_id") or f"{j.get('city', '')}_{j.get('title', '')}" 
+        for j in jobs
+    ])
+    return hashlib.md5("|".join(job_ids).encode()).hexdigest()
 
 
 class JobRAG:
@@ -183,15 +188,13 @@ class JobRAG:
             name="jobs",
             metadata={"hnsw:space": "cosine"}  # Use cosine similarity
         )
+        
+        # Track current content hash to skip redundant rebuilds
+        self._current_hash = None
     
     def generate_embedding(self, text: str) -> List[float]:
         """
         Generate embedding using ASU AI text-embedding-3-small.
-        
-        Uses ASU AI embeddings API with OpenAI's text-embedding-3-small model
-        configured for 1024 dimensions.
-        
-        This is synchronous to work within Streamlit's event loop.
         
         Args:
             text: Text to embed
@@ -201,7 +204,6 @@ class JobRAG:
         """
         from config import ASU_AI_EMBEDDINGS_MODEL, ASU_AI_EMBEDDINGS_PROVIDER, ASU_AI_EMBEDDINGS_DIMENSIONS
         
-        # Use ASU AI embeddings (synchronous call)
         return self.llm_provider.generate_embedding_sync(
             text=text,
             model=ASU_AI_EMBEDDINGS_MODEL,
@@ -215,7 +217,8 @@ class JobRAG:
     
     def add_jobs(self, jobs: List[Dict]) -> int:
         """
-        Add jobs to vector database.
+        Add jobs to vector database using batch parallel embeddings.
+        Skips rebuild if the same set of jobs is already indexed.
         
         Args:
             jobs: List of job dictionaries
@@ -226,47 +229,63 @@ class JobRAG:
         if not jobs:
             return 0
         
-        # Prepare data for ChromaDB
+        # Check if we already have these exact jobs indexed
+        new_hash = _compute_jobs_hash(jobs)
+        if self._current_hash == new_hash and self.collection.count() == len(jobs):
+            print(f"[RAG] Skipping rebuild — same {len(jobs)} jobs already indexed.")
+            return len(jobs)
+        
+        # Clear and rebuild
+        self.clear_jobs()
+        
+        # Prepare all texts for batch embedding
         documents = []
-        embeddings = []
         ids = []
         metadatas = []
         
         for i, job in enumerate(jobs):
-            # Prepare text for embedding
             job_text = prepare_job_text(job)
             documents.append(job_text)
             
-            # Generate embedding
-            embedding = self.generate_embedding_sync(job_text)
-            embeddings.append(embedding)
-            
             # Create unique ID
-            job_id = job.get("job_id") or f"{job['city']}_{i}"
+            job_id = job.get("job_id") or f"{job.get('city', 'unknown')}_{i}"
             ids.append(job_id)
             
             # Flatten metadata - ChromaDB doesn't support nested dicts
             metadata = {}
             for key, value in job.items():
                 if isinstance(value, dict):
-                    # Convert nested dict to JSON string
                     import json
                     metadata[key] = json.dumps(value)
                 elif isinstance(value, (str, int, float, bool)) or value is None:
                     metadata[key] = value
                 else:
-                    # Convert other types to string
                     metadata[key] = str(value)
             
             metadatas.append(metadata)
         
-        # Add to ChromaDB
+        # Generate embeddings in parallel batches
+        from config import ASU_AI_EMBEDDINGS_MODEL, ASU_AI_EMBEDDINGS_PROVIDER, ASU_AI_EMBEDDINGS_DIMENSIONS
+        
+        print(f"[RAG] Generating embeddings for {len(documents)} jobs with {EMBEDDING_BATCH_WORKERS} workers...")
+        embeddings = self.llm_provider.generate_embeddings_batch(
+            texts=documents,
+            model=ASU_AI_EMBEDDINGS_MODEL,
+            provider=ASU_AI_EMBEDDINGS_PROVIDER,
+            dimensions=ASU_AI_EMBEDDINGS_DIMENSIONS,
+            max_workers=EMBEDDING_BATCH_WORKERS
+        )
+        print(f"[RAG] Embeddings generated successfully.")
+        
+        # Add to ChromaDB in one call
         self.collection.add(
             documents=documents,
             embeddings=embeddings,
             ids=ids,
             metadatas=metadatas
         )
+        
+        self._current_hash = new_hash
         
         return len(jobs)
     
@@ -339,9 +358,11 @@ class JobRAG:
                 name="jobs",
                 metadata={"hnsw:space": "cosine"}
             )
+            self._current_hash = None
         except Exception:
             pass  # Collection might not exist
     
     def get_job_count(self) -> int:
         """Get the number of jobs in the database."""
         return self.collection.count()
+
