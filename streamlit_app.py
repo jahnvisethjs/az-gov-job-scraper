@@ -9,9 +9,10 @@ import sys
 from pathlib import Path
 from typing import Dict
 
+import asyncio
+
 # Fix for Windows + Playwright asyncio issue
 if sys.platform == 'win32':
-    import asyncio
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 # Import local utilities
