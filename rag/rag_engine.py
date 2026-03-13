@@ -135,15 +135,19 @@ def calculate_keyword_overlap(job: Dict, profile: Dict) -> float:
     if profile.get("interests"):
         profile_keywords.update([i.lower() for i in profile["interests"]])
     
-    # Simple keyword matching
-    total_keywords = len(profile_keywords)
-    
-    if total_keywords == 0:
+    # Simple keyword matching: What percentage of keywords found in the JOB are possessed by the PROFILE?
+    # To do this simply without an NLP extraction step, we check which profile skills appear in the job
+    # and cap it against an estimated maximum useful skill count (e.g., 10) so they aren't penalized for a huge resume.
+    if not profile_keywords:
         return 0.0
-    
+        
     matches = sum(1 for keyword in profile_keywords if keyword in job_text)
     
-    return matches / total_keywords
+    # Cap the denominator at 10 to simulate a "fully qualified" skillset count for a typical job description.
+    max_expected_skills = min(len(profile_keywords), 10)
+    score = matches / max_expected_skills if max_expected_skills > 0 else 0.0
+    
+    return min(1.0, score)
 
 
 def _compute_jobs_hash(jobs: List[Dict]) -> str:
@@ -324,17 +328,28 @@ class JobRAG:
             distances = results["distances"][0] if results.get("distances") else []
             
             for i, job_metadata in enumerate(metadatas):
-                # Convert cosine distance to similarity (1 - distance)
-                semantic_similarity = 1.0 - distances[i] if distances else 0.5
+                # Convert cosine distance to similarity
+                # ChromaDB cosine distance: 0 = identical, 1 = orthogonal, 2 = opposite
+                # So similarity is roughly 1 - distance.
+                raw_similarity = 1.0 - distances[i] if distances else 0.5
+                
+                # Apply a curve: embeddings for two different documents rarely exceed 0.7 or drop below 0.3.
+                # We normalize the 0.3 -> 0.7 range to represent 0% to 100% semantic match.
+                curved_similarity = max(0.0, min(1.0, (raw_similarity - 0.3) / 0.4))
                 
                 # Calculate keyword overlap
                 keyword_score = calculate_keyword_overlap(job_metadata, profile)
                 
-                # Combined score: 70% semantic, 30% keyword
-                final_score = (0.7 * semantic_similarity) + (0.3 * keyword_score)
+                # Combined score: 60% curved semantic, 40% keyword
+                final_score = (0.6 * curved_similarity) + (0.4 * keyword_score)
                 
                 # Convert to 0-100 scale
                 final_score = final_score * 100
+                
+                # Boost exceptionally low scores that might just have poor semantic correlation
+                # but good keyword matching
+                if final_score < 20 and keyword_score > 0.5:
+                    final_score += 15
                 
                 matched_jobs.append((job_metadata, final_score))
         
