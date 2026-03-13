@@ -39,6 +39,16 @@ from config import (
 # Load environment variables
 load_dotenv()
 
+# Automatically install Playwright browsers if running on Streamlit Cloud (Linux)
+if sys.platform.startswith('linux'):
+    @st.cache_resource
+    def install_playwright():
+        os.system("playwright install chromium")
+        os.system("playwright install-deps chromium")
+    
+    install_playwright()
+
+
 # Page configuration
 st.set_page_config(
     page_title="AI Job Application Agent",
