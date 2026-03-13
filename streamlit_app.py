@@ -611,8 +611,9 @@ def main():
                     finally:
                         loop.close()
 
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    matched_jobs = pool.submit(run_async_match).result()
+                with st.spinner("⏳ Analyzing job listings and computing match scores. This may take a minute..."):
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        matched_jobs = pool.submit(run_async_match).result()
 
                 # Store results
                 from utils import store_matched_jobs
