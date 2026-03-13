@@ -742,26 +742,5 @@ def display_tailoring_advice(job: Dict, api_key: str):
         else:
             st.info("No specific improvements suggested")
 
-    # Add Document Download Button
-    st.markdown("---")
-    from utils.resume_generator import ResumeGenerator
-    from utils import get_user_profile
-    
-    profile = get_user_profile()
-    try:
-        docx_bytes = ResumeGenerator.generate_docx(profile, advice)
-        st.download_button(
-            label="⬇️ Download Tailored Resume (.docx)",
-            data=docx_bytes,
-            file_name=f"Tailored_Resume_{job.get('company', 'Job').replace(' ', '_')}.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            use_container_width=True,
-            type="primary"
-        )
-    except Exception as e:
-        import traceback
-        st.error(f"Error generating document: {e}")
-        st.code(traceback.format_exc())
-
 if __name__ == "__main__":
     main()
