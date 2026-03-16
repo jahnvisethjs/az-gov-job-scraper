@@ -12,7 +12,8 @@ from .session_manager import (
     set_processing_status,
     is_processing,
     clear_session,
-    get_session_age
+    get_session_age,
+    dismiss_job
 )
 from .job_cache import (
     is_cache_fresh,
@@ -40,6 +41,7 @@ __all__ = [
     "is_processing",
     "clear_session",
     "get_session_age",
+    "dismiss_job",
     "is_cache_fresh",
     "get_cached_jobs",
     "save_cached_jobs",

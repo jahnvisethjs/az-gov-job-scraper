@@ -138,6 +138,15 @@ def get_matched_jobs(
     return deduped_jobs
 
 
+def dismiss_job(identifier: str):
+    """Remove a job from matched_jobs in session state."""
+    if "matched_jobs" in st.session_state:
+        st.session_state.matched_jobs = [
+            j for j in st.session_state.matched_jobs
+            if (j.get("job_id") or j.get("title")) != identifier
+        ]
+
+
 def set_processing_status(scraping: bool = False, matching: bool = False, error: Optional[str] = None):
     """Update processing status."""
     st.session_state.processing_status = {

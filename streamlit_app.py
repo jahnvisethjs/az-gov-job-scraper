@@ -671,7 +671,10 @@ def main():
                         st.rerun()
                 with btn_col3:
                     if st.button("🗑️", key=f"btn_clear_{i}", help="Dismiss"):
-                        pass
+                        from utils import dismiss_job
+                        identifier = job.get("job_id") or job.get("title")
+                        dismiss_job(identifier)
+                        st.rerun()
 
                 # Show tailoring advice if toggled
                 if st.session_state.get(f"show_advice_{i}", False):
