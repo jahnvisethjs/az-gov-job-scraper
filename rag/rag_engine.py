@@ -1,16 +1,20 @@
 """
-RAG Engine for semantic job matching using ChromaDB and ASU AI (OpenAI embeddings + gpt-4o).
+RAG Engine for semantic job matching using:
+- ASU AI text-embedding-3-small for vector embeddings (1024 dimensions)
+- ASU AI GPT-4o for text generation (resume parsing, tailoring advice)
+- ChromaDB for vector storage and similarity search
 """
 import chromadb
 from chromadb.config import Settings
 from typing import List, Dict, Optional, Tuple
 import asyncio
-import aiohttp
+import hashlib
 from config import (
     ASU_AI_API_KEY,
     ASU_AI_BASE_URL,
     VECTOR_DB_PATH,
-    MIN_MATCH_SCORE_THRESHOLD
+    MIN_MATCH_SCORE_THRESHOLD,
+    EMBEDDING_BATCH_WORKERS
 )
 import os
 from pathlib import Path
@@ -117,8 +121,6 @@ def calculate_keyword_overlap(job: Dict, profile: Dict) -> float:
         Keyword overlap score (0.0 to 1.0)
     """
     # Extract keywords from job
-    job_keywords = set()
-    
     job_text = f"{job.get('title', '')} {job.get('description', '')} {job.get('requirements', '')}".lower()
     
     # Extract keywords from profile
@@ -133,18 +135,24 @@ def calculate_keyword_overlap(job: Dict, profile: Dict) -> float:
     if profile.get("interests"):
         profile_keywords.update([i.lower() for i in profile["interests"]])
     
-    # Simple keyword matching (can be improved with NLP)
-    matches = 0
+    # Simple keyword matching
     total_keywords = len(profile_keywords)
     
     if total_keywords == 0:
         return 0.0
     
-    for keyword in profile_keywords:
-        if keyword in job_text:
-            matches += 1
+    matches = sum(1 for keyword in profile_keywords if keyword in job_text)
     
     return matches / total_keywords
+
+
+def _compute_jobs_hash(jobs: List[Dict]) -> str:
+    """Compute a content hash for a list of jobs to detect changes."""
+    job_ids = sorted([
+        j.get("job_id") or f"{j.get('city', '')}_{j.get('title', '')}" 
+        for j in jobs
+    ])
+    return hashlib.md5("|".join(job_ids).encode()).hexdigest()
 
 
 class JobRAG:
@@ -163,7 +171,7 @@ class JobRAG:
         if not self.api_key:
             raise ValueError("ASU AI API key is required")
         
-        # Initialize ASU AI provider for text generation
+        # Initialize ASU AI provider for both text generation AND embeddings
         self.llm_provider = ASUAIProvider(api_key=self.api_key)
         
         # Initialize ChromaDB
@@ -180,50 +188,37 @@ class JobRAG:
             name="jobs",
             metadata={"hnsw:space": "cosine"}  # Use cosine similarity
         )
+        
+        # Track current content hash to skip redundant rebuilds
+        self._current_hash = None
     
-    async def generate_embedding(self, text: str) -> List[float]:
+    def generate_embedding(self, text: str) -> List[float]:
         """
-        Generate embedding using OpenAI text-embedding-3-small via ASU AI.
+        Generate embedding using ASU AI text-embedding-3-small.
         
         Args:
             text: Text to embed
             
         Returns:
-            Embedding vector
+            Embedding vector (1024 dimensions)
         """
-        url = f"{self.base_url}/embeddings"  # Use /embeddings endpoint
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        from config import ASU_AI_EMBEDDINGS_MODEL, ASU_AI_EMBEDDINGS_PROVIDER, ASU_AI_EMBEDDINGS_DIMENSIONS
         
-        # ASU AI embeddings format
-        payload = {
-            "query": text,  # Use 'query' not 'input'
-            "embeddings_provider": "openai",
-            "embeddings_model": "te3s"  # te3s = text-embedding-3-small
-        }
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                response.raise_for_status()
-                result = await response.json()
-                
-                # ASU AI returns embeddings directly in the response
-                if "embeddings" in result:
-                    return result["embeddings"]
-                elif isinstance(result, list):
-                    return result
-                else:
-                    raise ValueError(f"Unexpected embedding response: {result}")
+        return self.llm_provider.generate_embedding_sync(
+            text=text,
+            model=ASU_AI_EMBEDDINGS_MODEL,
+            provider=ASU_AI_EMBEDDINGS_PROVIDER,
+            dimensions=ASU_AI_EMBEDDINGS_DIMENSIONS
+        )
     
     def generate_embedding_sync(self, text: str) -> List[float]:
-        """Synchronous wrapper for generate_embedding."""
-        return asyncio.run(self.generate_embedding(text))
+        """Alias for generate_embedding (already synchronous)."""
+        return self.generate_embedding(text)
     
     def add_jobs(self, jobs: List[Dict]) -> int:
         """
-        Add jobs to vector database.
+        Add jobs to vector database using batch parallel embeddings.
+        Skips rebuild if the same set of jobs is already indexed.
         
         Args:
             jobs: List of job dictionaries
@@ -234,35 +229,63 @@ class JobRAG:
         if not jobs:
             return 0
         
-        # Prepare data for ChromaDB
+        # Check if we already have these exact jobs indexed
+        new_hash = _compute_jobs_hash(jobs)
+        if self._current_hash == new_hash and self.collection.count() == len(jobs):
+            print(f"[RAG] Skipping rebuild — same {len(jobs)} jobs already indexed.")
+            return len(jobs)
+        
+        # Clear and rebuild
+        self.clear_jobs()
+        
+        # Prepare all texts for batch embedding
         documents = []
-        embeddings = []
         ids = []
         metadatas = []
         
         for i, job in enumerate(jobs):
-            # Prepare text for embedding
             job_text = prepare_job_text(job)
             documents.append(job_text)
             
-            # Generate embedding
-            embedding = self.generate_embedding_sync(job_text)
-            embeddings.append(embedding)
-            
             # Create unique ID
-            job_id = job.get("job_id") or f"{job['city']}_{i}"
+            job_id = job.get("job_id") or f"{job.get('city', 'unknown')}_{i}"
             ids.append(job_id)
             
-            # Store metadata (all job fields)
-            metadatas.append(job)
+            # Flatten metadata - ChromaDB doesn't support nested dicts
+            metadata = {}
+            for key, value in job.items():
+                if isinstance(value, dict):
+                    import json
+                    metadata[key] = json.dumps(value)
+                elif isinstance(value, (str, int, float, bool)) or value is None:
+                    metadata[key] = value
+                else:
+                    metadata[key] = str(value)
+            
+            metadatas.append(metadata)
         
-        # Add to ChromaDB
+        # Generate embeddings in parallel batches
+        from config import ASU_AI_EMBEDDINGS_MODEL, ASU_AI_EMBEDDINGS_PROVIDER, ASU_AI_EMBEDDINGS_DIMENSIONS
+        
+        print(f"[RAG] Generating embeddings for {len(documents)} jobs with {EMBEDDING_BATCH_WORKERS} workers...")
+        embeddings = self.llm_provider.generate_embeddings_batch(
+            texts=documents,
+            model=ASU_AI_EMBEDDINGS_MODEL,
+            provider=ASU_AI_EMBEDDINGS_PROVIDER,
+            dimensions=ASU_AI_EMBEDDINGS_DIMENSIONS,
+            max_workers=EMBEDDING_BATCH_WORKERS
+        )
+        print(f"[RAG] Embeddings generated successfully.")
+        
+        # Add to ChromaDB in one call
         self.collection.add(
             documents=documents,
             embeddings=embeddings,
             ids=ids,
             metadatas=metadatas
         )
+        
+        self._current_hash = new_hash
         
         return len(jobs)
     
@@ -335,9 +358,11 @@ class JobRAG:
                 name="jobs",
                 metadata={"hnsw:space": "cosine"}
             )
+            self._current_hash = None
         except Exception:
             pass  # Collection might not exist
     
     def get_job_count(self) -> int:
         """Get the number of jobs in the database."""
         return self.collection.count()
+

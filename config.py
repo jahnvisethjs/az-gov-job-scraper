@@ -8,27 +8,18 @@ from typing import List, Dict
 # LLM Provider Configuration
 # =============================================================================
 
-# LLM Provider Selection: "asu_ai" (default) or "gemini"
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "asu_ai")
-
-# Gemini API Configuration (legacy)
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-
-# Rate Limiting (Gemini Free Tier)
-GEMINI_RPM = 15  # Requests per minute
-GEMINI_RPD = 1500  # Requests per day
-GEMINI_TPD = 1_000_000  # Tokens per day
-
-# Gemini Model Configuration
-GEMINI_MODEL = "gemini-2.5-flash"
-GEMINI_EMBEDDING_MODEL = "models/embedding-001"
-
-# ASU AI Platform Configuration (Primary Provider)
+# ASU AI Platform Configuration (Primary and Only Provider)
 ASU_AI_ENABLED = os.getenv("ASU_AI_ENABLED", "true").lower() == "true"
 ASU_AI_API_KEY = os.getenv("ASU_AI_API_KEY", "")
 ASU_AI_BASE_URL = os.getenv("ASU_AI_BASE_URL", "https://api-main.aiml.asu.edu")
+
+# ASU AI Text Generation Model
 ASU_AI_MODEL = os.getenv("ASU_AI_MODEL", "gpt-4o")
-ASU_AI_EMBEDDING_MODEL = "text-embedding-3-small"  # OpenAI embeddings via ASU AI
+
+# ASU AI Embeddings Configuration
+ASU_AI_EMBEDDINGS_PROVIDER = os.getenv("ASU_AI_EMBEDDINGS_PROVIDER", "openai")
+ASU_AI_EMBEDDINGS_MODEL = os.getenv("ASU_AI_EMBEDDINGS_MODEL", "te3s")  # text-embedding-3-small abbreviation
+ASU_AI_EMBEDDINGS_DIMENSIONS = int(os.getenv("ASU_AI_EMBEDDINGS_DIMENSIONS", "1024"))
 
 # Arizona City Job Sites
 ARIZONA_CITIES: List[Dict[str, str]] = [
@@ -114,9 +105,14 @@ SESSION_TIMEOUT_MINUTES = 60
 MAX_RESUME_SIZE_MB = 5
 SUPPORTED_RESUME_FORMATS = [".pdf", ".docx", ".txt"]
 
+# Cache Settings
+JOB_CACHE_HOURS = int(os.getenv("JOB_CACHE_HOURS", "6"))  # How long scraped jobs stay fresh
+CACHE_DIR = os.getenv("CACHE_DIR", "./data/cache")  # Cache directory path
+EMBEDDING_BATCH_WORKERS = int(os.getenv("EMBEDDING_BATCH_WORKERS", "2"))  # Parallel embedding workers
+
 # Job Matching Settings
 TOP_JOBS_TO_DISPLAY = 50
-MIN_MATCH_SCORE_THRESHOLD = 40  # Only show jobs with 40%+ match
+MIN_MATCH_SCORE_THRESHOLD = 0  # Temporarily set to 0 to see all jobs and their scores
 
 # RAG Settings
 EMBEDDING_CHUNK_SIZE = 500

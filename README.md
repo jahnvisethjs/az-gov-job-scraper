@@ -103,8 +103,7 @@ az-gov-job-scraper/
 │
 ├── utils/
 │   ├── pdf_extractor.py      # PDF/DOCX text extraction
-│   ├── session_manager.py    # Streamlit session state
-│   └── rate_limiter.py       # Gemini API rate limiting
+│   └── session_manager.py    # Streamlit session state
 │
 ├── rag/
 │   ├── resume_parser.py      # AI resume parsing
@@ -114,10 +113,7 @@ az-gov-job-scraper/
 │   ├── base_scraper.py
 │   └── ...
 │
-├── agents/                   # (Phase 4) LangGraph workflows
-│   └── ...
-│
-└── mcp_servers/              # (Phase 5) MCP tools
+└── agents/                   # (Phase 4) LangGraph workflows
     └── ...
 ```
 
@@ -131,7 +127,6 @@ This project teaches:
 - 🔲 **Web Scraping**: Playwright, BeautifulSoup, multi-site strategies
 - 🔲 **RAG**: Vector embeddings, ChromaDB, semantic search
 - 🔲 **LangGraph**: Agent workflows, tool use, state machines
-- 🔲 **MCP**: Building reusable AI tool servers
 
 ## 🔑 API Key Setup
 
@@ -178,7 +173,6 @@ The app automatically handles rate limiting!
 | **Web Scraping** | Playwright, BeautifulSoup4 |
 | **Vector DB** | ChromaDB (Phase 3) |
 | **Orchestration** | LangGraph (Phase 4) |
-| **Tools** | MCP (Phase 5) |
 
 ## 📝 Roadmap
 
@@ -186,8 +180,7 @@ The app automatically handles rate limiting!
 - [x] **Phase 2**: Web scraping engine ✅
 - [x] **Phase 3**: RAG implementation ✅
 - [ ] **Phase 4**: LangGraph agents
-- [ ] **Phase 5**: MCP tool servers
-- [ ] **Phase 6**: UI polish & job tracking
+- [ ] **Phase 5**: UI polish & job tracking
 
 ## 🤝 Contributing
 
@@ -212,3 +205,4 @@ MIT License - feel free to use and modify!
 **Status**: Phase 3 Complete ✅ | Phase 4 Up Next 🚀
 
 Made with ❤️ for Arizona job seekers
+

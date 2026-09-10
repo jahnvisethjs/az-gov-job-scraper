@@ -93,6 +93,8 @@ class ASUAIProvider:
         """
         Synchronous wrapper for generate_content.
         
+        Uses nest_asyncio to handle Streamlit's existing event loop.
+        
         Args:
             prompt: Input prompt for the model
             model: Optional model override
@@ -100,69 +102,159 @@ class ASUAIProvider:
         Returns:
             Generated text response
         """
-        return asyncio.run(self.generate_content(prompt, model))
-    
-    async def generate_embedding(self, text: str) -> List[float]:
-        """
-        Generate embedding vector using /embeddings endpoint.
+        import concurrent.futures
         
-        Note: ASU AI Platform may have a dedicated embeddings endpoint.
-        This is a placeholder implementation. Verify the actual endpoint format.
+        def _run():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(self.generate_content(prompt, model))
+            finally:
+                loop.close()
+        
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            return pool.submit(_run).result()
+    
+    
+    def generate_embedding(
+        self,
+        text: str,
+        model: str = "te3s",  # ASU AI abbreviation for text-embedding-3-small
+        provider: str = "openai",
+        dimensions: Optional[int] = 1024
+    ) -> List[float]:
+        """
+        Generate embedding vector using ASU AI /embeddings endpoint.
+        
+        Uses synchronous requests library (ASU AI server returns 500 with aiohttp).
         
         Args:
             text: Text to embed
+            model: Embeddings model name
+            provider: Embeddings provider (default: "openai")
+            dimensions: Embedding dimensions (default: 1024)
             
         Returns:
             Embedding vector as list of floats
-            
-        Raises:
-            NotImplementedError: If embeddings endpoint format is unknown
         """
-        # TODO: Verify actual ASU AI embeddings endpoint format
-        # The integration guide mentions /embeddings but we need to confirm the request/response format
+        import requests
+        import time
+        
         url = f"{self.base_url}/embeddings"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
+        
         payload = {
-            "text": text,
-            # May need additional parameters like "model": "text-embedding-ada-002" or similar
+            "query": text,
+            "embeddings_provider": provider,
+            "embeddings_model": model
         }
         
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    response.raise_for_status()
-                    result = await response.json()
+        if dimensions:
+            payload["dimensions"] = dimensions
+        
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=30)
+                response.raise_for_status()
+                result = response.json()
+                
+                # Parse response - try common embedding response formats
+                if "response" in result:
+                    return result["response"]
+                elif "embeddings" in result:
+                    return result["embeddings"]
+                elif "embedding" in result:
+                    return result["embedding"]
+                elif "data" in result and len(result["data"]) > 0:
+                    if isinstance(result["data"], list) and "embedding" in result["data"][0]:
+                        return result["data"][0]["embedding"]
+                else:
+                    raise ValueError(f"Unexpected embedding response format: {result}")
                     
-                    # Common formats: {"embedding": [...]} or {"data": [{"embedding": [...]}]}
-                    if "embedding" in result:
-                        return result["embedding"]
-                    elif "data" in result and len(result["data"]) > 0:
-                        return result["data"][0].get("embedding", [])
-                    else:
-                        raise ValueError(f"Unexpected embedding response format: {result}")
-        except aiohttp.ClientResponseError as e:
-            if e.status == 404:
-                # Embeddings endpoint might not be available
-                raise NotImplementedError(
-                    "ASU AI embeddings endpoint not available or has different format. "
-                    "Consider using Gemini embeddings as fallback."
-                )
-            raise
+            except requests.HTTPError as e:
+                if e.response.status_code == 404:
+                    raise ValueError(
+                        f"ASU AI embeddings endpoint not found at {url}. "
+                        "Verify the endpoint is available and the base URL is correct."
+                    )
+                elif e.response.status_code == 401:
+                    raise ValueError("ASU AI API authentication failed. Check your API key.")
+                elif e.response.status_code == 400:
+                    raise ValueError(f"Bad request to ASU AI embeddings API: {e.response.text}")
+                elif e.response.status_code >= 500 and attempt < max_retries - 1:
+                    wait_time = (2 ** attempt) + 0.5
+                    print(f"[ASU AI] Server error (attempt {attempt + 1}/{max_retries}), retrying in {wait_time:.1f}s...")
+                    time.sleep(wait_time)
+                    continue
+                raise
+            except requests.ConnectionError as e:
+                if attempt < max_retries - 1:
+                    wait_time = (2 ** attempt) + 0.5
+                    print(f"[ASU AI] Connection error (attempt {attempt + 1}/{max_retries}), retrying in {wait_time:.1f}s...")
+                    time.sleep(wait_time)
+                    continue
+                raise
     
-    def generate_embedding_sync(self, text: str) -> List[float]:
+    def generate_embedding_sync(self, text: str, model: str = "te3s", provider: str = "openai", dimensions: Optional[int] = 1024) -> List[float]:
+        """Synchronous wrapper for generate_embedding (already synchronous)."""
+        return self.generate_embedding(text, model, provider, dimensions)
+    
+    def generate_embeddings_batch(
+        self,
+        texts: List[str],
+        model: str = "te3s",
+        provider: str = "openai",
+        dimensions: Optional[int] = 1024,
+        max_workers: int = 5
+    ) -> List[List[float]]:
         """
-        Synchronous wrapper for generate_embedding.
+        Generate embeddings for multiple texts in parallel using ThreadPoolExecutor.
         
         Args:
-            text: Text to embed
+            texts: List of texts to embed
+            model: Embeddings model name
+            provider: Embeddings provider
+            dimensions: Embedding dimensions
+            max_workers: Number of parallel workers
             
         Returns:
-            Embedding vector
+            List of embedding vectors (same order as input texts)
         """
-        return asyncio.run(self.generate_embedding(text))
+        import concurrent.futures
+        
+        if not texts:
+            return []
+        
+        def _embed_single(text):
+            return self.generate_embedding(text, model, provider, dimensions)
+        
+        embeddings = [None] * len(texts)
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_idx = {
+                executor.submit(_embed_single, text): i 
+                for i, text in enumerate(texts)
+            }
+            for future in concurrent.futures.as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    embeddings[idx] = future.result()
+                except Exception as e:
+                    print(f"[ASU AI] Warning: embedding failed for text {idx}: {e}")
+                    # Use None as fallback - callers should handle this
+                    embeddings[idx] = None
+        
+        # Replace any None embeddings with zero vectors (same dimension as first valid one)
+        valid = next((e for e in embeddings if e is not None), None)
+        if valid is not None:
+            dim = len(valid)
+            embeddings = [e if e is not None else [0.0] * dim for e in embeddings]
+        
+        return embeddings
     
     async def chat_completion(self, messages: List[Dict[str, str]], model: str = None) -> str:
         """

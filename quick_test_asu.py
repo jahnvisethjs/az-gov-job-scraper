@@ -1,13 +1,14 @@
-"""Quick test with the provided ASU AI token"""
+"""Quick test using an ASU AI token from the environment."""
 import asyncio
 import sys
 import os
+from dotenv import load_dotenv
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Set the API key directly
-os.environ["ASU_AI_API_KEY"] = "***REMOVED-CREDENTIAL***"
+# Load the API key from .env or the process environment.
+load_dotenv()
 
 from rag.asu_ai_provider import ASUAIProvider
 

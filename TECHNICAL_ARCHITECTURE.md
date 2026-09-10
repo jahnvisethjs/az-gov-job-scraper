@@ -12,10 +12,9 @@
 4. [Core Components](#core-components)
 5. [Resume Parsing Pipeline](#resume-parsing-pipeline)
 6. [RAG Engine Architecture](#rag-engine-architecture)
-7. [MCP Server Integration](#mcp-server-integration)
-8. [Job Matching Workflow](#job-matching-workflow)
-9. [Technology Stack](#technology-stack)
-10. [Configuration & Environment](#configuration--environment)
+7. [Job Matching Workflow](#job-matching-workflow)
+8. [Technology Stack](#technology-stack)
+9. [Configuration & Environment](#configuration--environment)
 
 ---
 
@@ -29,7 +28,6 @@ AI-powered job search application that matches user resumes with Arizona governm
 - **Semantic Job Matching**: ChromaDB vector search with Gemini embeddings
 - **Personalized Advice**: LLM-generated tailoring recommendations
 - **Multi-City Scraping**: Web scraping across 15+ Arizona cities
-- **MCP Integration**: Model Context Protocol servers for external tool access
 
 ### User Journey
 ```
@@ -82,27 +80,6 @@ Ranked results with tailoring advice
 │  └──────────────┘     └──────────────┘                          │
 └──────────────────────────────┬────────────────────────────────────┘
                                │
-                               │
-┌──────────────────────────────▼────────────────────────────────────┐
-│                    MATCHED JOBS + SCORES                          │
-│        (Ranked list with semantic similarity scores)              │
-└──────────────────────────────┬────────────────────────────────────┘
-                               │
-                ┌──────────────┴──────────────┐
-                │                             │
-┌───────────────▼──────────┐   ┌──────────────▼─────────────────────┐
-│  TAILORING ADVISOR       │   │      MCP SERVERS                   │
-│    (ASU AI gpt-4o)       │   │   (resume_parser_server.py)        │
-│                          │   │                                    │
-│ • Personalized advice    │   │ • Claude Desktop integration       │
-│ • Keyword suggestions    │   │ • External tool access             │
-│ • Gap analysis           │   │ • Resume parsing API               │
-└──────────────────────────┘   └────────────────────────────────────┘
-```
-
----
-
-## 3. Data Flow
 
 ### Complete Request Flow
 
@@ -345,18 +322,7 @@ class ResumeExtractor:
             return file_bytes.decode()
 ```
 
-#### `rate_limiter.py`
-```python
-class RateLimiter:
-    """Enforce API rate limits"""
-    def __init__(self, rpm, rpd, tpd):
-        self.rpm = rpm  # Requests per minute
-        self.rpd = rpd  # Requests per day
-        self.tpd = tpd  # Tokens per day
-    
-    async def acquire(self, estimated_tokens):
-        """Wait if necessary before making request"""
-```
+
 
 ---
 
@@ -787,7 +753,7 @@ For each job-resume pair:
 
 ---
 
-## 7. MCP Server Integration
+
 
 ### What is MCP?
 
@@ -828,7 +794,6 @@ For each job-resume pair:
 
 ### Implementation
 
-**File: `mcp_servers/resume_parser_server.py`**
 
 ```python
 #!/usr/bin/env python3
@@ -933,14 +898,12 @@ Claude: "This resume shows expertise in Python, GIS, R, and SQL..."
 
 ### Configuration
 
-**File: `mcp_servers/mcp_config.json`**
 
 ```json
 {
   "mcpServers": {
     "resume-parser": {
       "command": "python",
-      "args": ["mcp_servers/resume_parser_server.py"],
       "env": {
         "ASU_AI_API_KEY": "${ASU_AI_API_KEY}"
       }
@@ -1212,10 +1175,8 @@ az-gov-job-scraper/
 │   ├── __init__.py
 │   ├── session.py             # Session management
 │   ├── resume_extractor.py    # PDF/DOCX parsing
-│   ├── rate_limiter.py        # API rate limiting
 │   └── validators.py          # Input validation
 │
-├── mcp_servers/               # MCP server implementations
 │   ├── resume_parser_server.py
 │   └── mcp_config.json
 │

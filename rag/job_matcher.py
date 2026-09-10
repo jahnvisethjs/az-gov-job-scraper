@@ -2,15 +2,19 @@
 Job Matcher and Tailoring Advisor for personalized job recommendations.
 """
 from typing import List, Dict, Tuple
-import google.generativeai as genai
 from .rag_engine import JobRAG
 from scrapers import ScraperRegistry
 import asyncio
 import os
 from config import (
-    GEMINI_API_KEY,
-    GEMINI_MODEL,
+    ASU_AI_API_KEY,
     TOP_JOBS_TO_DISPLAY
+)
+from utils.job_cache import (
+    is_cache_fresh,
+    get_cached_jobs,
+    save_cached_jobs,
+    get_cache_age
 )
 
 
@@ -22,81 +26,115 @@ class JobMatcher:
         Initialize job matcher.
         
         Args:
-            api_key: Gemini API key (defaults to config)
+            api_key: ASU AI API key (defaults to config)
         """
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY") or GEMINI_API_KEY
+        self.api_key = api_key or os.getenv("ASU_AI_API_KEY") or ASU_AI_API_KEY
         self.rag_engine = JobRAG(api_key=self.api_key)
     
     async def match_jobs_to_profile(
         self,
         profile: Dict,
         cities: List[str],
-        progress_callback=None
+        progress_callback=None,
+        force_refresh: bool = False
     ) -> List[Dict]:
         """
         Complete workflow: scrape → embed → match → rank.
+        Uses cache for recently scraped cities, scrapes stale ones in parallel.
         
         Args:
             profile: User profile dictionary
             cities: List of city names to scrape
             progress_callback: Optional callback function for progress updates
+            force_refresh: If True, ignore cache and re-scrape all cities
             
         Returns:
             List of matched jobs with scores, sorted by relevance
         """
         all_jobs = []
         
-        # Step 1: Scrape jobs from selected cities
-        if progress_callback:
-            progress_callback(f"Scraping jobs from {len(cities)} cities...")
+        # Step 1: Separate cached vs stale cities
+        cached_cities = []
+        stale_cities = []
         
-        for i, city in enumerate(cities):
-            try:
-                if progress_callback:
-                    progress_callback(f"Scraping {city} ({i+1}/{len(cities)})...")
-                
-                scraper = ScraperRegistry.get_scraper(city)
-                jobs = await scraper.scrape_with_retry(max_retries=2)
-                
-                # Convert JobData objects to dictionaries
-                jobs_dict = [job.to_dict() for job in jobs]
-                all_jobs.extend(jobs_dict)
-                
-                if progress_callback:
-                    progress_callback(f"Found {len(jobs)} jobs from {city}")
-                
-            except Exception as e:
-                if progress_callback:
-                    progress_callback(f"Error scraping {city}: {e}")
-                continue
+        for city in cities:
+            if not force_refresh and is_cache_fresh(city):
+                cached_cities.append(city)
+            else:
+                stale_cities.append(city)
+        
+        # Load cached jobs
+        if cached_cities:
+            if progress_callback:
+                ages = [get_cache_age(c) for c in cached_cities]
+                avg_age = sum(a for a in ages if a) / len([a for a in ages if a]) if ages else 0
+                progress_callback(f"Loading {len(cached_cities)} cities from cache (avg {avg_age:.1f}h old)...")
+            
+            for city in cached_cities:
+                jobs = get_cached_jobs(city)
+                if jobs:
+                    all_jobs.extend(jobs)
+        
+        # Step 2: Scrape stale cities in parallel
+        if stale_cities:
+            if progress_callback:
+                progress_callback(f"Scraping {len(stale_cities)} cities (parallel, max 3 at a time)...")
+            
+            semaphore = asyncio.Semaphore(3)  # Limit concurrent browsers
+            
+            async def scrape_city(city):
+                async with semaphore:
+                    try:
+                        if progress_callback:
+                            progress_callback(f"Scraping {city}...")
+                        
+                        scraper = ScraperRegistry.get_scraper(city)
+                        jobs = await scraper.scrape_with_retry(max_retries=2)
+                        
+                        jobs_dict = [job.to_dict() for job in jobs]
+                        
+                        # Save to cache
+                        save_cached_jobs(city, jobs_dict)
+                        
+                        if progress_callback:
+                            progress_callback(f"Found {len(jobs)} jobs from {city}")
+                        
+                        return jobs_dict
+                    except Exception as e:
+                        if progress_callback:
+                            progress_callback(f"Error scraping {city}: {e}")
+                        return []
+            
+            # Run all stale city scrapes in parallel
+            results = await asyncio.gather(*[scrape_city(city) for city in stale_cities])
+            
+            for city_jobs in results:
+                all_jobs.extend(city_jobs)
         
         if not all_jobs:
             return []
         
-        # Step 2: Add jobs to vector database
+        # Step 3: Add jobs to vector database (with smart rebuild skipping)
         if progress_callback:
             progress_callback(f"Indexing {len(all_jobs)} jobs in vector database...")
         
-        # Clear previous jobs
-        self.rag_engine.clear_jobs()
-        
-        # Add new jobs
         self.rag_engine.add_jobs(all_jobs)
         
-        # Step 3: Semantic search and matching
+        # Step 4: Semantic search and matching
         if progress_callback:
             progress_callback("Finding best matches...")
         
         matched_jobs = self.rag_engine.search_jobs(profile, top_k=100)
         
-        # Step 4: Format results
+        # Step 5: Format results
         results = []
         for job, score in matched_jobs:
             job["match_score"] = round(score, 1)
             results.append(job)
         
         if progress_callback:
-            progress_callback(f"Found {len(results)} matching jobs!")
+            cache_info = f" ({len(cached_cities)} cached, {len(stale_cities)} scraped)" if cached_cities else ""
+            progress_callback(f"Found {len(results)} matching jobs!{cache_info}")
         
         return results
     
@@ -127,18 +165,20 @@ class JobMatcher:
 
 
 class TailoringAdvisor:
-    """Generate personalized resume tailoring advice using Gemini."""
+    """Generate personalized resume tailoring advice using ASU AI."""
     
     def __init__(self, api_key: str = None):
         """
         Initialize tailoring advisor.
         
-        Args:
-            api_key: Gemini API key (defaults to config)
+Args:
+            api_key: ASU AI API key (defaults to config)
         """
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY") or GEMINI_API_KEY
-        genai.configure(api_key=self.api_key)
-        self.model = genai.GenerativeModel(GEMINI_MODEL)
+        from config import ASU_AI_API_KEY, ASU_AI_MODEL
+        from .asu_ai_provider import ASUAIProvider
+        
+        self.api_key = api_key or os.getenv("ASU_AI_API_KEY") or ASU_AI_API_KEY
+        self.provider = ASUAIProvider(api_key=self.api_key, model=ASU_AI_MODEL)
     
     def generate_advice(self, job: Dict, profile: Dict) -> Dict[str, any]:
         """
@@ -153,7 +193,7 @@ class TailoringAdvisor:
             {
                 "skill_gaps": List of missing skills,
                 "keywords": List of keywords to add,
-                "improvements": List of improvement suggestions,
+               "improvements": List of improvement suggestions,
                 "strengths": List of matching strengths
             }
         """
@@ -193,11 +233,13 @@ Format your response as JSON:
 """
         
         try:
-            response = self.model.generate_content(prompt)
-            text = response.text.strip()
+            # Use ASU AI provider (synchronous)
+            response_text = self.provider.generate_content_sync(prompt)
             
             # Extract JSON from response
-            # Remove markdown code blocks if present
+            text = response_text.strip()
+            
+           # Remove markdown code blocks if present
             if "```json" in text:
                 text = text.split("```json")[1].split("```")[0].strip()
             elif "```" in text:

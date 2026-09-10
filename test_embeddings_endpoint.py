@@ -1,7 +1,12 @@
 """Test embeddings endpoint directly"""
 import requests
+import os
+from dotenv import load_dotenv
 
-API_TOKEN = "***REMOVED-CREDENTIAL***"
+load_dotenv()
+API_TOKEN = os.getenv("ASU_AI_API_KEY")
+if not API_TOKEN:
+    raise RuntimeError("Set ASU_AI_API_KEY in .env or the process environment before running this test.")
 
 # Try different endpoint formats
 endpoints = [

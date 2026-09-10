@@ -4,10 +4,11 @@ Tests resume parsing and embeddings with the ASU AI API
 """
 import asyncio
 import os
+from dotenv import load_dotenv
 
-# Set credentials
-os.environ["ASU_AI_API_KEY"] = "***REMOVED-CREDENTIAL***"
-os.environ["LLM_PROVIDER"] = "asu_ai"
+# Load credentials from .env or the process environment.
+load_dotenv()
+os.environ.setdefault("LLM_PROVIDER", "asu_ai")
 
 from rag.resume_parser import ResumeParser
 from rag.rag_engine import JobRAG

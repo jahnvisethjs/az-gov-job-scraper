@@ -12,9 +12,18 @@ from .session_manager import (
     set_processing_status,
     is_processing,
     clear_session,
-    get_session_age
+    get_session_age,
+    dismiss_job
 )
-from .rate_limiter import GeminiRateLimiter, get_rate_limiter
+from .job_cache import (
+    is_cache_fresh,
+    get_cached_jobs,
+    save_cached_jobs,
+    clear_cache,
+    get_cache_summary,
+    get_cache_age
+)
+
 
 __all__ = [
     "ResumeExtractor",
@@ -30,6 +39,12 @@ __all__ = [
     "is_processing",
     "clear_session",
     "get_session_age",
-    "GeminiRateLimiter",
-    "get_rate_limiter"
+    "dismiss_job",
+    "is_cache_fresh",
+    "get_cached_jobs",
+    "save_cached_jobs",
+    "clear_cache",
+    "get_cache_summary",
+    "get_cache_age",
 ]
+

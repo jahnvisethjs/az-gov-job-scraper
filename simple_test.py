@@ -3,9 +3,15 @@ Simple test of ASU AI API
 """
 import requests
 import json
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 API_URL = "https://api-main.aiml.asu.edu/query"
-API_TOKEN = "***REMOVED-CREDENTIAL***"
+API_TOKEN = os.getenv("ASU_AI_API_KEY")
+if not API_TOKEN:
+    raise RuntimeError("Set ASU_AI_API_KEY in .env or the process environment before running this script.")
 
 headers = {
     "Authorization": f"Bearer {API_TOKEN}",

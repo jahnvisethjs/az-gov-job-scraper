@@ -1,6 +1,6 @@
 """
-Arizona Government Job Scraper - Streamlit Web Application
-Phase 1: Basic UI with resume upload and profile creation
+AI Job Application Agent - Streamlit Web Application
+Redesigned UI: centered layout, dark theme, resume upload, job search & results
 """
 import streamlit as st
 from dotenv import load_dotenv
@@ -9,9 +9,10 @@ import sys
 from pathlib import Path
 from typing import Dict
 
+import asyncio
+
 # Fix for Windows + Playwright asyncio issue
 if sys.platform == 'win32':
-    import asyncio
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 # Import local utilities
@@ -22,7 +23,8 @@ from utils import (
     is_profile_complete,
     ResumeExtractor,
     validate_resume_size,
-    get_rate_limiter
+    get_cache_summary,
+    clear_cache
 )
 from rag import ResumeParser
 from config import (
@@ -30,668 +32,721 @@ from config import (
     DEGREE_OPTIONS,
     MAX_RESUME_SIZE_MB,
     SUPPORTED_RESUME_FORMATS,
-    GEMINI_API_KEY
+    ASU_AI_API_KEY
 )
 
 # Load environment variables
 load_dotenv()
 
+# Automatically install Playwright browsers if running on Streamlit Cloud (Linux)
+if sys.platform.startswith('linux'):
+    @st.cache_resource
+    def install_playwright():
+        os.system("playwright install chromium")
+        os.system("playwright install-deps chromium")
+    
+    install_playwright()
+
+
 # Page configuration
 st.set_page_config(
-    page_title="AZ Gov Jobs - AI Job Matcher",
-    page_icon="🏛️",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="AI Job Application Agent",
+    page_icon="🚀",
+    layout="centered",
+    initial_sidebar_state="collapsed"
 )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Custom CSS: Dark theme matching the target design
+# ─────────────────────────────────────────────────────────────────────────────
+def inject_custom_css():
+    st.markdown("""
+    <style>
+        /* ── Import Google Font ────────────────────────────────────── */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+        /* ── Global Dark Theme ─────────────────────────────────────── */
+        .stApp {
+            background-color: #0d1117 !important;
+            color: #e6edf3 !important;
+            font-family: 'Inter', sans-serif !important;
+        }
+
+        /* Hide default Streamlit sidebar toggle & footer */
+        [data-testid="collapsedControl"] { display: none !important; }
+        footer { display: none !important; }
+        #MainMenu { display: none !important; }
+
+        /* ── Header Styling ────────────────────────────────────────── */
+        .app-header {
+            text-align: center;
+            padding: 2.5rem 0 0.5rem 0;
+        }
+        .app-header h1 {
+            font-size: 2.4rem;
+            font-weight: 800;
+            color: #e6edf3;
+            margin: 0;
+        }
+        .app-header .subtitle {
+            font-size: 1.05rem;
+            color: #8b949e;
+            margin-top: 0.4rem;
+            font-weight: 400;
+        }
+
+        /* ── Card Container ────────────────────────────────────────── */
+        .dark-card {
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 12px;
+            padding: 1.5rem 1.8rem;
+            margin-bottom: 1.2rem;
+        }
+        .dark-card h3 {
+            color: #e6edf3;
+            font-size: 1.15rem;
+            font-weight: 700;
+            margin: 0 0 1rem 0;
+        }
+
+        /* ── Streamlit Input Overrides ─────────────────────────────── */
+        .stTextInput > div > div > input {
+            background-color: #0d1117 !important;
+            color: #e6edf3 !important;
+            border: 1px solid #30363d !important;
+            border-radius: 8px !important;
+            padding: 0.65rem 0.9rem !important;
+            font-size: 0.95rem !important;
+        }
+        .stTextInput > label {
+            color: #8b949e !important;
+            font-weight: 500 !important;
+            font-size: 0.9rem !important;
+        }
+        .stTextInput > div > div > input:focus {
+            border-color: #388bfd !important;
+            box-shadow: 0 0 0 3px rgba(56, 139, 253, 0.15) !important;
+        }
+
+        /* ── File Uploader Overrides ───────────────────────────────── */
+        [data-testid="stFileUploader"] {
+            background-color: transparent !important;
+        }
+        [data-testid="stFileUploader"] section {
+            background-color: #0d1117 !important;
+            border: 2px dashed #30363d !important;
+            border-radius: 10px !important;
+            padding: 1rem !important;
+        }
+        [data-testid="stFileUploader"] section:hover {
+            border-color: #388bfd !important;
+        }
+        [data-testid="stFileUploader"] label {
+            color: #8b949e !important;
+        }
+        [data-testid="stFileUploader"] small {
+            color: #6e7681 !important;
+        }
+
+        /* ── Slider Overrides ──────────────────────────────────────── */
+        .stSlider > label {
+            color: #8b949e !important;
+            font-weight: 500 !important;
+            font-size: 0.9rem !important;
+        }
+        .stSlider [data-testid="stThumbValue"] {
+            color: #e6edf3 !important;
+        }
+        .stSlider [data-baseweb="slider"] div[role="slider"] {
+            background-color: #388bfd !important;
+            border-color: #388bfd !important;
+        }
+        .stSlider [data-baseweb="slider"] div[data-testid="stTickBarMin"],
+        .stSlider [data-baseweb="slider"] div[data-testid="stTickBarMax"] {
+            color: #6e7681 !important;
+        }
+
+        /* ── Primary Button ────────────────────────────────────────── */
+        .stButton > button[kind="primary"],
+        .stButton > button {
+            width: 100% !important;
+            background: linear-gradient(135deg, #1f6feb 0%, #388bfd 100%) !important;
+            color: white !important;
+            font-weight: 700 !important;
+            font-size: 1.05rem !important;
+            border: none !important;
+            border-radius: 10px !important;
+            padding: 0.75rem 1.5rem !important;
+            transition: all 0.25s ease !important;
+            letter-spacing: 0.02em !important;
+        }
+        .stButton > button:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 6px 20px rgba(56, 139, 253, 0.35) !important;
+        }
+        .stButton > button:active {
+            transform: translateY(0) !important;
+        }
+
+        /* ── Results Header ────────────────────────────────────────── */
+        .results-header {
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: #e6edf3;
+            margin: 2rem 0 1rem 0;
+        }
+
+        /* ── Job Result Card ───────────────────────────────────────── */
+        .job-card {
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 12px;
+            padding: 1.3rem 1.6rem;
+            margin-bottom: 0.9rem;
+            transition: border-color 0.2s ease;
+        }
+        .job-card:hover {
+            border-color: #388bfd;
+        }
+        .job-card-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #e6edf3;
+            display: inline;
+        }
+        .score-badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            margin-left: 10px;
+            vertical-align: middle;
+        }
+        .score-high {
+            background: rgba(63, 185, 80, 0.15);
+            color: #3fb950;
+            border: 1px solid rgba(63, 185, 80, 0.3);
+        }
+        .score-med {
+            background: rgba(210, 153, 34, 0.15);
+            color: #d29922;
+            border: 1px solid rgba(210, 153, 34, 0.3);
+        }
+        .score-low {
+            background: rgba(248, 81, 73, 0.15);
+            color: #f85149;
+            border: 1px solid rgba(248, 81, 73, 0.3);
+        }
+        .job-company {
+            color: #8b949e;
+            font-size: 0.95rem;
+            margin-top: 0.3rem;
+        }
+        .job-location {
+            color: #8b949e;
+            font-size: 0.88rem;
+            margin-top: 0.2rem;
+        }
+        .job-location .pin {
+            color: #f85149;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 3px 12px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-top: 0.5rem;
+        }
+        .status-tailored {
+            background: rgba(63, 185, 80, 0.15);
+            color: #3fb950;
+            border: 1px solid rgba(63, 185, 80, 0.3);
+        }
+        .status-skipped {
+            background: rgba(139, 148, 158, 0.15);
+            color: #8b949e;
+            border: 1px solid rgba(139, 148, 158, 0.3);
+        }
+
+        /* ── Alert / Info box overrides ─────────────────────────────── */
+        [data-testid="stAlert"] {
+            background-color: #161b22 !important;
+            border: 1px solid #21262d !important;
+            color: #e6edf3 !important;
+            border-radius: 8px !important;
+        }
+
+        /* ── Spinner ───────────────────────────────────────────────── */
+        .stSpinner > div {
+            color: #388bfd !important;
+        }
+
+        /* ── Expander overrides ─────────────────────────────────────── */
+        .streamlit-expanderHeader {
+            background-color: #161b22 !important;
+            color: #e6edf3 !important;
+            border-radius: 8px !important;
+        }
+
+        /* ── Link button override ──────────────────────────────────── */
+        .stLinkButton > a {
+            background: linear-gradient(135deg, #1f6feb 0%, #388bfd 100%) !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 8px !important;
+        }
+
+        /* ── Metric overrides ──────────────────────────────────────── */
+        [data-testid="stMetricLabel"] {
+            color: #8b949e !important;
+        }
+        [data-testid="stMetricValue"] {
+            color: #e6edf3 !important;
+        }
+
+        /* ── Markdown text color fix ───────────────────────────────── */
+        .stMarkdown, .stMarkdown p, .stMarkdown li {
+            color: #e6edf3 !important;
+        }
+
+        /* ── Selectbox / Multiselect Overrides ─────────────────────── */
+        .stSelectbox > label,
+        .stMultiSelect > label {
+            color: #8b949e !important;
+            font-weight: 500 !important;
+            font-size: 0.9rem !important;
+        }
+        .stSelectbox [data-baseweb="select"],
+        .stMultiSelect [data-baseweb="select"] {
+            background-color: #0d1117 !important;
+            border-color: #30363d !important;
+            border-radius: 8px !important;
+        }
+        .stSelectbox [data-baseweb="select"] > div,
+        .stMultiSelect [data-baseweb="select"] > div {
+            background-color: #0d1117 !important;
+            color: #e6edf3 !important;
+        }
+        [data-baseweb="popover"] {
+            background-color: #161b22 !important;
+            border: 1px solid #30363d !important;
+        }
+        [data-baseweb="popover"] li {
+            color: #e6edf3 !important;
+        }
+        [data-baseweb="popover"] li:hover {
+            background-color: #21262d !important;
+        }
+        [data-baseweb="tag"] {
+            background-color: rgba(56, 139, 253, 0.15) !important;
+            color: #58a6ff !important;
+            border: 1px solid rgba(56, 139, 253, 0.3) !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Job card HTML renderer
+# ─────────────────────────────────────────────────────────────────────────────
+def render_job_card_html(job: Dict, has_tailoring: bool = False) -> str:
+    """Render a single job result card as HTML."""
+    title = job.get("title", "Untitled")
+    score = job.get("match_score", 0)
+    company = job.get("city", "") or job.get("department", "") or ""
+    location = job.get("location", "") or job.get("city", "")
+
+    # Score badge class
+    if score >= 60:
+        badge_cls = "score-high"
+    elif score >= 40:
+        badge_cls = "score-med"
+    else:
+        badge_cls = "score-low"
+
+    score_display = f"{int(round(score))}/100"
+
+    # Status badge
+    if has_tailoring:
+        status_html = '<div><span class="status-badge status-tailored">✅ Resume Tailored</span></div>'
+    else:
+        status_html = ""
+
+    return f"""
+    <div class="job-card">
+        <div>
+            <span class="job-card-title">{title}</span>
+            <span class="score-badge {badge_cls}">{score_display}</span>
+        </div>
+        <div class="job-company">{company}</div>
+        <div class="job-location"><span class="pin">📍</span> {location}</div>
+        {status_html}
+    </div>
+    """
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main Application
+# ─────────────────────────────────────────────────────────────────────────────
 def main():
     """Main application function."""
-    
+
     # Initialize session state
     init_session_state()
-    
-    # Initialize theme in session state
-    if 'theme' not in st.session_state:
-        st.session_state.theme = 'dark'
-    
-    # Header
-    st.markdown('<div class="main-header">🏛️ Arizona Government Job Finder</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">AI-Powered Job Matching for Arizona Cities & Counties</div>', unsafe_allow_html=True)
-    
+
+    # Inject custom CSS
+    inject_custom_css()
+
     # Check for API key
-    api_key = os.getenv("GEMINI_API_KEY") or GEMINI_API_KEY
+    api_key = os.getenv("ASU_AI_API_KEY") or ASU_AI_API_KEY
     if not api_key:
-        st.error("⚠️ **Gemini API Key not found!**")
-        st.info("Please create a `.env` file with your `GEMINI_API_KEY` or set it in `config.py`")
-        st.code("GEMINI_API_KEY=your_api_key_here", language="bash")
-        st.markdown("[Get a free API key from Google AI Studio](https://makersuite.google.com/app/apikey)")
+        st.error("⚠️ **ASU AI API Key not found!**")
+        st.info("Please create a `.env` file with your `ASU_AI_API_KEY` or set it in `config.py`")
+        st.code("ASU_AI_API_KEY=your_api_key_here", language="bash")
         st.stop()
-    
-    # Apply dynamic CSS based on theme
-    if st.session_state.theme == 'dark':
-        st.markdown("""
-        <style>
-            /* Dark Theme */
-            .stApp {
-                background-color: #0E1117;
-                color: #FAFAFA;
-            }
-            .main-header {
-                font-size: 3rem;
-                font-weight: 900;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-                text-align: center;
-                margin-bottom: 0.5rem;
-                padding: 1rem 0;
-            }
-            .sub-header {
-                font-size: 1.3rem;
-                color: #B0B0B0;
-                text-align: center;
-                margin-bottom: 2rem;
-                font-weight: 500;
-            }
-            .hero-section {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                padding: 3rem 2rem;
-                border-radius: 16px;
-                color: white;
-                text-align: center;
-                margin: 2rem 0;
-                box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
-            }
-            .hero-title {
-                font-size: 2.5rem;
-                font-weight: bold;
-                margin-bottom: 1rem;
-            }
-            .hero-subtitle {
-                font-size: 1.2rem;
-                opacity: 0.9;
-            }
-            .feature-card {
-                background: #1E1E1E;
-                padding: 1.5rem;
-                border-radius: 12px;
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-                border-left: 4px solid #667eea;
-                margin: 1rem 0;
-                transition: transform 0.2s;
-                color: #FAFAFA;
-            }
-            .feature-card:hover {
-                transform: translateY(-4px);
-                box-shadow: 0 8px 12px rgba(102, 126, 234, 0.4);
-            }
-            .feature-icon {
-                font-size: 2rem;
-                margin-bottom: 0.5rem;
-            }
-            .stButton>button {
-                width: 100%;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                font-weight: bold;
-                border-radius: 8px;
-                padding: 0.75rem 1.5rem;
-                border: none;
-                font-size: 1.1rem;
-                transition: all 0.3s;
-            }
-            .stButton>button:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 8px 16px rgba(102, 126, 234, 0.3);
-            }
-            .stat-card {
-                background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-                padding: 1.5rem;
-                border-radius: 12px;
-                color: white;
-                text-align: center;
-                margin: 0.5rem 0;
-            }
-            .stat-number {
-                font-size: 2.5rem;
-                font-weight: bold;
-            }
-            .stat-label {
-                font-size: 0.9rem;
-                opacity: 0.9;
-            }
-        </style>
-        """, unsafe_allow_html=True)
-    else:  # Light theme
-        st.markdown("""
-        <style>
-            /* Light Theme */
-            .stApp {
-                background-color: #FFFFFF;
-                color: #262730;
-            }
-            .main-header {
-                font-size: 3rem;
-                font-weight: 900;
-                background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-                text-align: center;
-                margin-bottom: 0.5rem;
-                padding: 1rem 0;
-            }
-            .sub-header {
-                font-size: 1.3rem;
-                color: #4B5563;
-                text-align: center;
-                margin-bottom: 2rem;
-                font-weight: 500;
-            }
-            .hero-section {
-                background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%);
-                padding: 3rem 2rem;
-                border-radius: 16px;
-                color: white;
-                text-align: center;
-                margin: 2rem 0;
-                box-shadow: 0 10px 30px rgba(79, 70, 229, 0.2);
-            }
-            .hero-title {
-                font-size: 2.5rem;
-                font-weight: bold;
-                margin-bottom: 1rem;
-            }
-            .hero-subtitle {
-                font-size: 1.2rem;
-                opacity: 0.95;
-            }
-            .feature-card {
-                background: white;
-                padding: 1.5rem;
-                border-radius: 12px;
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-                border-left: 4px solid #4F46E5;
-                margin: 1rem 0;
-                transition: transform 0.2s;
-                color: #1F2937;
-            }
-            .feature-card:hover {
-                transform: translateY(-4px);
-                box-shadow: 0 8px 12px rgba(0, 0, 0, 0.15);
-            }
-            .feature-icon {
-                font-size: 2rem;
-                margin-bottom: 0.5rem;
-            }
-            .stButton>button {
-                width: 100%;
-                background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%);
-                color: white;
-                font-weight: bold;
-                border-radius: 8px;
-                padding: 0.75rem 1.5rem;
-                border: none;
-                font-size: 1.1rem;
-                transition: all 0.3s;
-            }
-            .stButton>button:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 8px 16px rgba(79, 70, 229, 0.3);
-            }
-            .stat-card {
-                background: linear-gradient(135deg, #EC4899 0%, #8B5CF6 100%);
-                padding: 1.5rem;
-                border-radius: 12px;
-                color: white;
-                text-align: center;
-                margin: 0.5rem 0;
-            }
-            .stat-number {
-                font-size: 2.5rem;
-                font-weight: bold;
-            }
-            .stat-label {
-                font-size: 0.9rem;
-                opacity: 0.95;
-            }
-        </style>
-        """, unsafe_allow_html=True)
-    
-    # Sidebar: User Profile Input
-    with st.sidebar:
-        # Theme toggle at the top
-        st.markdown("### 🎨 Theme")
-        theme_col1, theme_col2 = st.columns(2)
-        with theme_col1:
-            if st.button("🌙 Dark", use_container_width=True, type="primary" if st.session_state.theme == 'dark' else "secondary"):
-                st.session_state.theme = 'dark'
-                st.rerun()
-        with theme_col2:
-            if st.button("☀️ Light", use_container_width=True, type="primary" if st.session_state.theme == 'light' else "secondary"):
-                st.session_state.theme = 'light'
-                st.rerun()
-        
-        st.markdown("---")
-        
-        st.header("📋 Your Profile")
-        st.markdown("---")
-        
-        # Name input
-        name = st.text_input(
-            "Name",
-            value=get_user_profile()["name"],
-            placeholder="Enter your full name"
+
+    # ── Header ──────────────────────────────────────────────────────────────
+    st.markdown("""
+    <div class="app-header">
+        <h1>🚀 AI Job Application Agent</h1>
+        <div class="subtitle">Find jobs, score matches, and get tailored resumes automatically</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Resume Upload Section ───────────────────────────────────────────────
+    st.markdown('<div class="dark-card"><h3>📁 Your Resume</h3>', unsafe_allow_html=True)
+
+    uploaded_file = st.file_uploader(
+        "Upload your resume (PDF, DOCX, or TXT)",
+        type=[fmt.replace(".", "") for fmt in SUPPORTED_RESUME_FORMATS],
+        help=f"Supported: {', '.join(SUPPORTED_RESUME_FORMATS)} (Max {MAX_RESUME_SIZE_MB}MB)",
+        label_visibility="collapsed"
+    )
+
+    # Process resume if uploaded
+    profile = get_user_profile()
+    if uploaded_file is not None:
+        file_bytes = uploaded_file.read()
+
+        if not validate_resume_size(file_bytes, MAX_RESUME_SIZE_MB):
+            st.error(f"❌ File too large! Maximum size is {MAX_RESUME_SIZE_MB}MB")
+        else:
+            with st.spinner("📖 Extracting text from resume..."):
+                try:
+                    resume_text = ResumeExtractor.extract_text(file_bytes, uploaded_file.name)
+                    if resume_text:
+                        current_profile = get_user_profile()
+                        same_resume = current_profile.get("resume_text") == resume_text
+                        session_parse = current_profile.get("resume_parsed") if same_resume else None
+
+                        update_user_profile(
+                            resume_text=resume_text,
+                            resume_filename=uploaded_file.name,
+                            resume_parsed=session_parse
+                        )
+
+                        # Parse once per uploaded resume and retain the result only
+                        # in this user's Streamlit session.
+                        if session_parse is None:
+                            try:
+                                parser = ResumeParser(api_key)
+                                parsed_resume = parser.parse_resume_sync(resume_text)
+                                if parsed_resume.get("error"):
+                                    st.warning("Resume text was extracted, but AI parsing failed. Please try again.")
+                                else:
+                                    update_user_profile(resume_parsed=parsed_resume)
+                            except Exception:
+                                pass  # Non-critical, still have raw text
+
+                        # Extract name from parsed resume
+                        parsed = get_user_profile().get("resume_parsed")
+                        if parsed and parsed.get("name"):
+                            update_user_profile(name=parsed["name"])
+
+                        st.success(f"✅ Resume uploaded: {uploaded_file.name}")
+                    else:
+                        st.error("❌ Could not extract text from resume")
+                except Exception as e:
+                    st.error(f"❌ Error processing resume: {e}")
+
+    elif profile["resume_filename"]:
+        resume_name = profile.get("name", "")
+        if resume_name:
+            st.markdown(f"✅ Resume uploaded! Name: {resume_name}", unsafe_allow_html=True)
+        else:
+            st.markdown(f"✅ Resume uploaded: {profile['resume_filename']}", unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── Your Profile Section ────────────────────────────────────────────────
+    st.markdown('<div class="dark-card"><h3>📋 Your Profile</h3>', unsafe_allow_html=True)
+
+    name = st.text_input(
+        "Name",
+        value=get_user_profile()["name"],
+        placeholder="Enter your full name",
+        key="profile_name"
+    )
+    if name and name != get_user_profile()["name"]:
+        update_user_profile(name=name)
+
+    degree = st.selectbox(
+        "Highest Education Level",
+        options=DEGREE_OPTIONS,
+        index=DEGREE_OPTIONS.index(get_user_profile()["degree"]) if get_user_profile()["degree"] in DEGREE_OPTIONS else 0,
+        key="profile_degree"
+    )
+    if degree:
+        update_user_profile(degree=degree)
+
+    interests = st.multiselect(
+        "Areas of Interest",
+        options=AREAS_OF_INTEREST,
+        default=get_user_profile()["interests"],
+        help="Select all that apply",
+        key="profile_interests"
+    )
+    if interests != get_user_profile()["interests"]:
+        update_user_profile(interests=interests)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── Job Search Inputs ───────────────────────────────────────────────────
+    st.markdown('<div class="dark-card">', unsafe_allow_html=True)
+
+    job_title = st.text_input(
+        "Job Title",
+        value=st.session_state.get("search_job_title", ""),
+        placeholder="e.g. Backend Developer",
+        key="search_job_title"
+    )
+
+    location = st.text_input(
+        "Location",
+        value=st.session_state.get("search_location", ""),
+        placeholder="e.g. Phoenix, Arizona",
+        key="search_location"
+    )
+
+    # Sliders side-by-side
+    col_score, col_jobs = st.columns(2)
+    with col_score:
+        min_score = st.slider(
+            "Min Score",
+            min_value=0,
+            max_value=100,
+            value=st.session_state.get("min_score_val", 25),
+            step=5,
+            key="min_score_val"
         )
-        
-        # Education
-        degree = st.selectbox(
-            "Highest Education Level",
-            options=DEGREE_OPTIONS,
-            index=DEGREE_OPTIONS.index(get_user_profile()["degree"]) if get_user_profile()["degree"] else 0
+    with col_jobs:
+        max_jobs = st.slider(
+            "Max Jobs",
+            min_value=1,
+            max_value=20,
+            value=st.session_state.get("max_jobs_val", 5),
+            step=1,
+            key="max_jobs_val"
         )
-        
-        # Areas of interest
-        interests = st.multiselect(
-            "Areas of Interest",
-            options=AREAS_OF_INTEREST,
-            default=get_user_profile()["interests"],
-            help="Select all that apply"
-        )
-        
-        st.markdown("---")
-        st.subheader("📄 Resume Upload")
-        
-        # Resume upload
-        uploaded_file = st.file_uploader(
-            "Upload your resume",
-            type=[fmt.replace(".", "") for fmt in SUPPORTED_RESUME_FORMATS],
-            help=f"Supported formats: {', '.join(SUPPORTED_RESUME_FORMATS)} (Max {MAX_RESUME_SIZE_MB}MB)"
-        )
-        
-        # Process resume if uploaded
-        if uploaded_file is not None:
-            file_bytes = uploaded_file.read()
-            
-            # Validate size
-            if not validate_resume_size(file_bytes, MAX_RESUME_SIZE_MB):
-                st.error(f"❌ File too large! Maximum size is {MAX_RESUME_SIZE_MB}MB")
-            else:
-                # Extract text
-                with st.spinner("📖 Extracting text from resume..."):
-                    try:
-                        resume_text = ResumeExtractor.extract_text(file_bytes, uploaded_file.name)
-                        
-                        if resume_text:
-                            # Store in session
-                            update_user_profile(
-                                resume_text=resume_text,
-                                resume_filename=uploaded_file.name
-                            )
-                            st.success(f"✅ Resume uploaded: {uploaded_file.name}")
-                        else:
-                            st.error("❌ Could not extract text from resume")
-                    except Exception as e:
-                        st.error(f"❌ Error processing resume: {e}")
-        
-        # Show current resume if uploaded
-        elif get_user_profile()["resume_filename"]:
-            st.info(f"📄 Current resume: {get_user_profile()['resume_filename']}")
-        
-        st.markdown("---")
-        
-        # Save profile button
-        if st.button("💾 Save Profile", type="primary"):
-            if not name:
-                st.warning("⚠️ Please enter your name")
-            elif not degree:
-                st.warning("⚠️ Please select your education level")
-            elif not interests:
-                st.warning("⚠️ Please select at least one area of interest")
-            elif not get_user_profile()["resume_text"]:
-                st.warning("⚠️ Please upload your resume")
-            else:
-                # Update profile
-                update_user_profile(
-                    name=name,
-                    degree=degree,
-                    interests=interests
-                )
-                
-                # Parse resume with AI
-                with st.spinner("🤖 Analyzing your resume with AI..."):
-                    try:
-                        parser = ResumeParser(api_key)
-                        parsed_resume = parser.parse_resume_sync(get_user_profile()["resume_text"])
-                        
-                        update_user_profile(resume_parsed=parsed_resume)
-                        
-                        st.success("✅ Profile saved successfully!")
-                    except Exception as e:
-                        st.error(f"❌ Error parsing resume: {e}")
-        
-        # Clear session button
-        if st.button("🗑️ Clear Session"):
-            from utils import clear_session
-            clear_session()
-            st.rerun()
-    
-    # Main content area
-    if not is_profile_complete():
-        # Hero Section
-        st.markdown("""
-        <div class="hero-section">
-            <div class="hero-title">🏛️ Find Your Perfect Government Job</div>
-            <div class="hero-subtitle">AI-powered job matching across 15 Arizona cities • Personalized resume insights • Free to use</div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Quick stats
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("""
-            <div class="stat-card">
-                <div class="stat-number">15+</div>
-                <div class="stat-label">Arizona Cities</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with col2:
-            st.markdown("""
-            <div class="stat-card">
-                <div class="stat-number">AI</div>
-                <div class="stat-label">Powered Matching</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        st.info("👈 **Get Started:** Complete your profile in the sidebar to begin finding your dream job!")
-    
-    else:
-        # Profile is complete - show profile summary
-        profile = get_user_profile()
-        
-        st.success("✅ **Profile Complete!** Ready to find matching jobs.")
-        
-        # Display profile summary
-        st.markdown("### 👤 Your Profile")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown(f"**Name:** {profile['name']}")
-            st.markdown(f"**Education:** {profile['degree']}")
-            st.markdown(f"**Resume:** {profile['resume_filename']}")
-        
-        with col2:
-            st.markdown(f"**Interests:** {', '.join(profile['interests'])}")
-        
-        st.markdown("---")
-        
-        # Job scraping and matching (Phase 3)
-        st.markdown("### 🔍 Find Matching Jobs")
-        
-        # City selection - automatically search all cities
-        from config import ARIZONA_CITIES
-        from scrapers import ScraperRegistry
-        
-        available_cities = ScraperRegistry.get_supported_cities()
-        selected_cities = available_cities[1:2]  # Search all cities by default
-        
-        # Show info about cities being searched
-        st.info(f"🔍 Searching {len(selected_cities)} Arizona cities: {', '.join(selected_cities[:5])}{'...' if len(selected_cities) > 5 else ''}")
-        
-        col1, col2 = st.columns([3, 1])
-        
-        with col1:
-            find_jobs_btn = st.button("🚀 Find Matching Jobs", type="primary", disabled=not selected_cities)
-        
-        with col2:
-            if st.session_state.matched_jobs:
-                if st.button("🗑️ Clear Results"):
-                    st.session_state.matched_jobs = []
-                    st.session_state.scraped_jobs = []
-                    st.rerun()
-        
-        # Process job search
-        if find_jobs_btn and selected_cities:
+
+    # Search button
+    search_clicked = st.button("🔍 Search & Analyze Jobs", type="primary")
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── Handle Search ───────────────────────────────────────────────────────
+    if search_clicked:
+        # Need resume to be uploaded
+        current_profile = get_user_profile()
+        if not current_profile["resume_text"]:
+            st.warning("⚠️ Please upload your resume first before searching for jobs.")
+        else:
+            # Auto-fill profile fields if not set (for the matching engine)
+            if not current_profile["name"]:
+                update_user_profile(name="User")
+            if not current_profile["degree"]:
+                update_user_profile(degree=DEGREE_OPTIONS[0])
+            if not current_profile["interests"]:
+                update_user_profile(interests=[AREAS_OF_INTEREST[0]])
+
             from rag import JobMatcher
-            import asyncio
-            
-            # Create progress container
-            progress_container = st.empty()
+            from scrapers import ScraperRegistry
+            from config import ARIZONA_CITIES
+            import concurrent.futures
+
+            available_cities = ScraperRegistry.get_supported_cities()
+            selected_cities = available_cities
+
+            # Create progress tracking
+            progress_bar = st.progress(0)
             status_container = st.empty()
-            
-            def update_progress(message: str):
-                status_container.info(f"⏳ {message}")
-            
+            status_container.info("⏳ Searching for matching jobs...")
+
             try:
-                # Create detailed progress tracking
-                progress_bar = st.progress(0)
-                status_container.info("⏳ Starting job search...")
-                
-                def update_progress(message: str):
-                    status_container.info(f"⏳ {message}")
-                    # Log to console as well for debugging
-                    print(f"[JobMatcher] {message}")
-                
-                # Initialize job matcher
                 matcher = JobMatcher(api_key)
-                
-                # Run matching workflow
-                matched_jobs = asyncio.run(
-                    matcher.match_jobs_to_profile(
-                        profile=get_user_profile(),
-                        cities=selected_cities,
-                        progress_callback=update_progress
-                    )
-                )
-                
+
+                # Capture profile before entering thread
+                user_profile = get_user_profile()
+
+                # Capture force_refresh flag
+                force_refresh = st.session_state.get('force_refresh', False)
+                st.session_state.force_refresh = False
+
+                def thread_safe_progress(message: str):
+                    print(f"[JobMatcher] {message}")
+
+                def run_async_match():
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        return loop.run_until_complete(
+                            matcher.match_jobs_to_profile(
+                                profile=user_profile,
+                                cities=selected_cities,
+                                progress_callback=thread_safe_progress,
+                                force_refresh=force_refresh
+                            )
+                        )
+                    finally:
+                        loop.close()
+
+                with st.spinner("⏳ Analyzing job listings and computing match scores. This may take a minute..."):
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        matched_jobs = pool.submit(run_async_match).result()
+
                 # Store results
                 from utils import store_matched_jobs
                 store_matched_jobs(matched_jobs)
-                
+
                 progress_bar.progress(1.0)
-                status_container.success(f"✅ Found {len(matched_jobs)} total jobs from all cities!")
-                
-                # Show breakdown by city if available
-                if len(matched_jobs) > 0:
-                    st.info(f"💼 Jobs will be displayed below. Use the filter to adjust minimum match score.")
-                else:
-                    st.warning("⚠️ No jobs found. This could mean:")
-                    st.write("- Some cities may have no current openings")
-                    st.write("- Website structures may have changed (scraper needs update)")
-                    st.write("- Check the console/terminal for detailed scraping logs")
-                
+                status_container.success(f"✅ Found {len(matched_jobs)} jobs!")
+
                 st.rerun()
-                    
+
             except Exception as e:
                 import traceback
-                status_container.error(f"❌ Error finding jobs: {e}")
-                # Show detailed traceback in expander
+                status_container.error(f"❌ Error: {e}")
                 with st.expander("🔍 Error Details"):
                     st.code(traceback.format_exc())
-        
-        # Display matched jobs
-        if st.session_state.matched_jobs:
-            from utils import get_matched_jobs
-            
-            st.markdown("---")
-            st.markdown(f"### 💼 Matched Jobs ({len(st.session_state.matched_jobs)} total)")
-            
-            # Display filter
-            st.markdown("**Filter Jobs by Match Score:**")
-            col1, col2, col3 = st.columns([3, 1, 1])
-            with col1:
-                min_score_filter = st.slider(
-                    "Minimum match score (%)",
-                    min_value=0,
-                    max_value=100,
-                    value=0,  # Changed to 0 to show ALL jobs by default
-                    step=5,
-                    help="Filter jobs by minimum match score. Set to 0 to see all jobs."
-                )
-            
-            filtered_jobs = get_matched_jobs(min_score=min_score_filter, limit=50)
-            
-            with col2:
-                st.metric("Showing", f"{len(filtered_jobs)} jobs")
-            
-            # Display job cards
-            for i, job in enumerate(filtered_jobs):
-                display_job_card(job, i, api_key)
-        
-        # Show rate limiter stats
-        with st.expander("⚙️ API Usage Stats"):
-            rate_limiter = get_rate_limiter()
-            stats = rate_limiter.get_stats()
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Requests (Last Minute)", f"{stats['requests_last_minute']}/{stats['rpm_limit']}")
-            with col2:
-                st.metric("Requests (Today)", f"{stats['requests_today']}/{stats['rpd_limit']}")
 
+    # ── Display Results ─────────────────────────────────────────────────────
+    if st.session_state.matched_jobs:
+        from utils import get_matched_jobs
 
-def display_job_card(job: Dict, index: int, api_key: str):
-    """Display a single job card with match score and tailoring advice."""
-    
-    # Determine score color
-    score = job.get("match_score", 0)
-    if score >= 80:
-        score_color = "#4CAF50"  # Green
-        badge_text = "Strong Match"
-    elif score >= 60:
-        score_color = "#FF9800"  # Orange
-        badge_text = "Good Match"
-    else:
-        score_color = "#F44336"  # Red
-        badge_text = "Fair Match"
-    
-    # Create expandable card
-    with st.expander(f"**{job.get('title', 'N/A')}** - {badge_text} ({score:.1f}%)", expanded=(index < 3)):
-        
-        # Score badge
+        # Apply filters
+        filtered_jobs = get_matched_jobs(min_score=min_score, limit=max_jobs)
+
         st.markdown(
-            f'<div style="background-color: {score_color}; color: white; padding: 8px 16px; '
-            f'border-radius: 20px; display: inline-block; margin-bottom: 10px; font-weight: bold;">'
-            f'Match Score: {score:.1f}%</div>',
+            f'<div class="results-header">Results ({len(filtered_jobs)} jobs analyzed)</div>',
             unsafe_allow_html=True
         )
-        
-        # Job details
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown(f"**🏛️ City:** {job.get('city', 'N/A')}")
-            st.markdown(f"**📍 Location:** {job.get('location', 'N/A')}")
-            st.markdown(f"**🏢 Department:** {job.get('department', 'N/A')}")
-        
-        with col2:
-            if job.get('salary'):
-                st.markdown(f"**💰 Salary:** {job['salary']}")
-            if job.get('closing_date'):
-                st.markdown(f"**📅 Closes:** {job['closing_date']}")
-            if job.get('job_type'):
-                st.markdown(f"**📋 Type:** {job['job_type']}")
-        
-        # Description
-        if job.get('description'):
-            st.markdown("**Description:**")
-            desc = job['description']
-            st.markdown(desc[:300] + "..." if len(desc) > 300 else desc)
-        
-        # Requirements
-        if job.get('requirements'):
-            with st.expander("📋 Requirements"):
-                st.markdown(job['requirements'])
-        
-        # Apply button and tailoring advice
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            if job.get('url'):
-                st.link_button("🔗 Apply Now", job['url'], use_container_width=True)
-        
-        with col2:
-            advice_key = f"show_advice_{index}"
-            if advice_key not in st.session_state:
-                st.session_state[advice_key] = False
-            
-            if st.button("💡 Get Tailoring Advice", key=f"btn_advice_{index}", use_container_width=True):
-                st.session_state[advice_key] = not st.session_state[advice_key]
-                st.rerun()
-        
-        # Show tailoring advice if requested
-        if st.session_state.get(advice_key, False):
-            display_tailoring_advice(job, api_key)
+
+        if len(filtered_jobs) == 0:
+            st.info("No jobs match your current filters. Try lowering the minimum score.")
+        else:
+            for i, job in enumerate(filtered_jobs):
+                # Check if tailoring advice has been generated
+                advice_key = f"advice_{job.get('job_id', '')}"
+                has_tailoring = advice_key in st.session_state
+
+                # Render card HTML
+                st.markdown(
+                    render_job_card_html(job, has_tailoring=has_tailoring),
+                    unsafe_allow_html=True
+                )
+
+                # Action buttons under each card
+                btn_col1, btn_col2, btn_col3 = st.columns([2, 2, 1])
+                with btn_col1:
+                    if job.get('url'):
+                        st.link_button("🔗 Apply Now", job['url'], use_container_width=True)
+                with btn_col2:
+                    tailor_key = f"show_advice_{i}"
+                    if tailor_key not in st.session_state:
+                        st.session_state[tailor_key] = False
+
+                    if st.button("💡 Get Tailoring Advice", key=f"btn_advice_{i}", use_container_width=True):
+                        st.session_state[tailor_key] = not st.session_state[tailor_key]
+                        st.rerun()
+                with btn_col3:
+                    if st.button("🗑️", key=f"btn_clear_{i}", help="Dismiss"):
+                        from utils import dismiss_job
+                        identifier = job.get("job_id") or job.get("title")
+                        dismiss_job(identifier)
+                        st.rerun()
+
+                # Show tailoring advice if toggled
+                if st.session_state.get(f"show_advice_{i}", False):
+                    display_tailoring_advice(job, api_key)
+
+                st.markdown("<div style='margin-bottom: 0.5rem;'></div>", unsafe_allow_html=True)
 
 
 def display_tailoring_advice(job: Dict, api_key: str):
     """Display personalized tailoring advice for a job."""
-    
+
     advice_cache_key = f"advice_{job.get('job_id', '')}"
-    
+
     # Check cache
     if advice_cache_key not in st.session_state:
         with st.spinner("🤖 Generating personalized advice..."):
             try:
                 from rag import TailoringAdvisor
                 from utils import get_user_profile
-                
+
                 advisor = TailoringAdvisor(api_key)
                 advice = advisor.generate_advice(job, get_user_profile())
                 st.session_state[advice_cache_key] = advice
             except Exception as e:
                 st.error(f"Error generating advice: {e}")
                 return
-    
+
     advice = st.session_state[advice_cache_key]
-    
-    # Display advice
+
+    # Display advice in a styled container
     st.markdown("---")
     st.markdown("### 💡 Personalized Resume Tailoring Advice")
-    
+
     col1, col2 = st.columns(2)
-    
+
     with col1:
-        # Strengths
         st.markdown("**✅ Your Strengths:**")
         if advice.get("strengths"):
             for strength in advice["strengths"]:
                 st.markdown(f"- {strength}")
         else:
             st.info("No specific strengths identified")
-        
-        # Keywords to add
+
         st.markdown("**🔑 Keywords to Add:**")
         if advice.get("keywords"):
             keywords_html = " ".join([
-                f'<span style="background-color: #E0E7FF; color: #3730A3; '
-                f'padding: 4px 12px; border-radius: 12px; margin: 4px; display: inline-block;">{kw}</span>'
+                f'<span style="background-color: rgba(56, 139, 253, 0.15); color: #58a6ff; '
+                f'padding: 4px 12px; border-radius: 12px; margin: 4px; display: inline-block; '
+                f'border: 1px solid rgba(56, 139, 253, 0.3);">{kw}</span>'
                 for kw in advice["keywords"]
             ])
             st.markdown(keywords_html, unsafe_allow_html=True)
         else:
             st.info("No keywords suggested")
-    
+
     with col2:
-        # Skill gaps
         st.markdown("**⚠️ Skill Gaps to Address:**")
         if advice.get("skill_gaps"):
             for gap in advice["skill_gaps"]:
                 st.markdown(f"- {gap}")
         else:
             st.success("No major skill gaps!")
-        
-        # Improvements
+
         st.markdown("**📈 Resume Improvements:**")
         if advice.get("improvements"):
             for improvement in advice["improvements"]:
                 st.markdown(f"- {improvement}")
         else:
             st.info("No specific improvements suggested")
-
-
 
 if __name__ == "__main__":
     main()
