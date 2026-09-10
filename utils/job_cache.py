@@ -4,7 +4,6 @@ Avoids re-scraping cities when cached results are still fresh.
 """
 import json
 import os
-import hashlib
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from pathlib import Path
@@ -22,11 +21,6 @@ def _city_cache_path(city: str) -> Path:
     """Get cache file path for a city."""
     safe_name = city.lower().replace(" ", "_").replace("/", "_")
     return _get_cache_dir() / f"jobs_{safe_name}.json"
-
-
-def _resume_cache_path() -> Path:
-    """Get cache file path for parsed resumes."""
-    return _get_cache_dir() / "resume_cache.json"
 
 
 def is_cache_fresh(city: str, max_age_hours: int = None) -> bool:
@@ -157,67 +151,3 @@ def get_cache_summary() -> Dict:
             continue
     
     return summary
-
-
-# --- Resume Cache ---
-
-def _resume_hash(resume_text: str) -> str:
-    """Generate a hash for resume text to use as cache key."""
-    return hashlib.md5(resume_text.encode("utf-8")).hexdigest()
-
-
-def get_cached_resume_parse(resume_text: str) -> Optional[Dict]:
-    """
-    Get cached parsed resume data if available.
-    
-    Args:
-        resume_text: Raw resume text
-        
-    Returns:
-        Parsed resume dict, or None if not cached
-    """
-    cache_file = _resume_cache_path()
-    if not cache_file.exists():
-        return None
-    
-    try:
-        with open(cache_file, "r", encoding="utf-8") as f:
-            cache = json.load(f)
-        
-        key = _resume_hash(resume_text)
-        entry = cache.get(key)
-        if entry:
-            return entry.get("parsed_data")
-    except (json.JSONDecodeError, FileNotFoundError):
-        pass
-    
-    return None
-
-
-def save_cached_resume_parse(resume_text: str, parsed_data: Dict):
-    """
-    Save parsed resume data to cache.
-    
-    Args:
-        resume_text: Raw resume text (used for cache key)
-        parsed_data: Parsed resume dictionary from LLM
-    """
-    cache_file = _resume_cache_path()
-    
-    # Load existing cache
-    cache = {}
-    if cache_file.exists():
-        try:
-            with open(cache_file, "r", encoding="utf-8") as f:
-                cache = json.load(f)
-        except (json.JSONDecodeError, FileNotFoundError):
-            cache = {}
-    
-    key = _resume_hash(resume_text)
-    cache[key] = {
-        "cached_at": datetime.now().isoformat(),
-        "parsed_data": parsed_data
-    }
-    
-    with open(cache_file, "w", encoding="utf-8") as f:
-        json.dump(cache, f, indent=2, default=str)

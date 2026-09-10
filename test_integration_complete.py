@@ -7,11 +7,12 @@ resume parsing and job matching for Arizona government jobs.
 import asyncio
 import os
 import sys
+from dotenv import load_dotenv
 
-# Set API key for testing
-os.environ["ASU_AI_API_KEY"] = "***REMOVED-CREDENTIAL***"
-os.environ["LLM_PROVIDER"] = "asu_ai"
-os.environ["ASU_AI_ENABLED"] = "true"
+# Load credentials from .env or the process environment.
+load_dotenv()
+os.environ.setdefault("LLM_PROVIDER", "asu_ai")
+os.environ.setdefault("ASU_AI_ENABLED", "true")
 
 from rag.asu_ai_provider import ASUAIProvider
 

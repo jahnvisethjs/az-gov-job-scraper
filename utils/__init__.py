@@ -21,9 +21,7 @@ from .job_cache import (
     save_cached_jobs,
     clear_cache,
     get_cache_summary,
-    get_cache_age,
-    get_cached_resume_parse,
-    save_cached_resume_parse
+    get_cache_age
 )
 
 
@@ -48,7 +46,5 @@ __all__ = [
     "clear_cache",
     "get_cache_summary",
     "get_cache_age",
-    "get_cached_resume_parse",
-    "save_cached_resume_parse",
 ]
 

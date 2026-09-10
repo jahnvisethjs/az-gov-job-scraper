@@ -4,9 +4,10 @@ Integration Test: ASU AI for Job Matching Application (Windows-Compatible)
 import asyncio
 import os
 import time
+from dotenv import load_dotenv
 
-# Set API key for testing
-os.environ["ASU_AI_API_KEY"] = "***REMOVED-CREDENTIAL***"
+# Load the API key from .env or the process environment.
+load_dotenv()
 
 from rag.asu_ai_provider import ASUAIProvider
 

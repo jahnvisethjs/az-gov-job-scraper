@@ -23,8 +23,6 @@ from utils import (
     is_profile_complete,
     ResumeExtractor,
     validate_resume_size,
-    get_cached_resume_parse,
-    save_cached_resume_parse,
     get_cache_summary,
     clear_cache
 )
@@ -441,21 +439,26 @@ def main():
                 try:
                     resume_text = ResumeExtractor.extract_text(file_bytes, uploaded_file.name)
                     if resume_text:
+                        current_profile = get_user_profile()
+                        same_resume = current_profile.get("resume_text") == resume_text
+                        session_parse = current_profile.get("resume_parsed") if same_resume else None
+
                         update_user_profile(
                             resume_text=resume_text,
-                            resume_filename=uploaded_file.name
+                            resume_filename=uploaded_file.name,
+                            resume_parsed=session_parse
                         )
 
-                        # Auto-parse the resume with AI
-                        cached_parse = get_cached_resume_parse(resume_text)
-                        if cached_parse:
-                            update_user_profile(resume_parsed=cached_parse)
-                        else:
+                        # Parse once per uploaded resume and retain the result only
+                        # in this user's Streamlit session.
+                        if session_parse is None:
                             try:
                                 parser = ResumeParser(api_key)
                                 parsed_resume = parser.parse_resume_sync(resume_text)
-                                save_cached_resume_parse(resume_text, parsed_resume)
-                                update_user_profile(resume_parsed=parsed_resume)
+                                if parsed_resume.get("error"):
+                                    st.warning("Resume text was extracted, but AI parsing failed. Please try again.")
+                                else:
+                                    update_user_profile(resume_parsed=parsed_resume)
                             except Exception:
                                 pass  # Non-critical, still have raw text
 

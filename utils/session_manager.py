@@ -7,6 +7,9 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 
+_UNSET = object()
+
+
 def init_session_state():
     """Initialize all session state variables if they don't exist."""
     
@@ -44,7 +47,7 @@ def update_user_profile(
     interests: Optional[List[str]] = None,
     resume_text: Optional[str] = None,
     resume_filename: Optional[str] = None,
-    resume_parsed: Optional[Dict] = None
+    resume_parsed: Any = _UNSET
 ):
     """
     Update user profile in session state.
@@ -67,7 +70,7 @@ def update_user_profile(
         st.session_state.user_profile["resume_text"] = resume_text
     if resume_filename is not None:
         st.session_state.user_profile["resume_filename"] = resume_filename
-    if resume_parsed is not None:
+    if resume_parsed is not _UNSET:
         st.session_state.user_profile["resume_parsed"] = resume_parsed
     
     if st.session_state.user_profile["created_at"] is None:

@@ -2,9 +2,9 @@
 Test different models available on ASU AI Platform
 """
 import asyncio
-import os
+from dotenv import load_dotenv
 
-os.environ["ASU_AI_API_KEY"] = "***REMOVED-CREDENTIAL***"
+load_dotenv()
 
 from rag.asu_ai_provider import ASUAIProvider
 
