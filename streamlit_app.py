@@ -608,7 +608,9 @@ def main():
                                 profile=user_profile,
                                 cities=selected_cities,
                                 progress_callback=thread_safe_progress,
-                                force_refresh=force_refresh
+                                force_refresh=force_refresh,
+                                job_title=job_title,
+                                location=location
                             )
                         )
                     finally:

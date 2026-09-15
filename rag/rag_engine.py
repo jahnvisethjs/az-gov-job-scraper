@@ -32,12 +32,15 @@ def prepare_job_text(job: Dict) -> str:
         Formatted text for embedding
     """
     parts = []
-    
+
     if job.get("title"):
         parts.append(f"Title: {job['title']}")
     
     if job.get("department"):
         parts.append(f"Department: {job['department']}")
+
+    if job.get("location") or job.get("city"):
+        parts.append(f"Location: {job.get('location') or job.get('city')}")
     
     if job.get("description"):
         parts.append(f"Description: {job['description']}")
@@ -62,6 +65,12 @@ def prepare_resume_text(profile: Dict) -> str:
         Formatted text for embedding
     """
     parts = []
+
+    if profile.get("target_job_title"):
+        parts.append(f"Target role: {profile['target_job_title']}")
+
+    if profile.get("target_location"):
+        parts.append(f"Preferred location: {profile['target_location']}")
     
     # Add interests
     if profile.get("interests"):
