@@ -6,6 +6,7 @@ from .rag_engine import JobRAG
 from scrapers import ScraperRegistry
 import asyncio
 import os
+import re
 from config import (
     ASU_AI_API_KEY,
     TOP_JOBS_TO_DISPLAY
@@ -16,6 +17,66 @@ from utils.job_cache import (
     save_cached_jobs,
     get_cache_age
 )
+
+
+_LOCATION_NOISE_WORDS = {"arizona", "az", "city", "of", "state", "county", "town"}
+
+
+def _normalized_terms(value: str, ignored_words=None) -> List[str]:
+    """Convert a free-text search value into comparable lowercase terms."""
+    terms = re.findall(r"[a-z0-9]+", (value or "").lower())
+    if ignored_words:
+        terms = [term for term in terms if term not in ignored_words]
+    return terms
+
+
+def narrow_cities_by_location(cities: List[str], location: str) -> List[str]:
+    """Limit scraping when the location names one of the supported cities."""
+    location_terms = _normalized_terms(location, _LOCATION_NOISE_WORDS)
+    if not location_terms:
+        return list(cities)
+
+    matching_cities = []
+    for city in cities:
+        city_terms = set(_normalized_terms(city, _LOCATION_NOISE_WORDS))
+        if all(term in city_terms for term in location_terms):
+            matching_cities.append(city)
+
+    # An unknown location may still appear in a posting's location field, so
+    # retain all cities and apply the record-level filter after scraping.
+    return matching_cities or list(cities)
+
+
+def filter_jobs_by_search(
+    jobs: List[Dict],
+    job_title: str = "",
+    location: str = ""
+) -> List[Dict]:
+    """Apply the UI's title and location criteria to normalized job records."""
+    title_terms = _normalized_terms(job_title)
+    location_terms = _normalized_terms(location, _LOCATION_NOISE_WORDS)
+    filtered_jobs = []
+
+    for job in jobs:
+        title_haystack = " ".join([
+            str(job.get("title") or ""),
+            str(job.get("department") or "")
+        ])
+        title_words = set(_normalized_terms(title_haystack))
+        if title_terms and not all(term in title_words for term in title_terms):
+            continue
+
+        location_haystack = " ".join([
+            str(job.get("location") or ""),
+            str(job.get("city") or "")
+        ])
+        location_words = set(_normalized_terms(location_haystack, _LOCATION_NOISE_WORDS))
+        if location_terms and not all(term in location_words for term in location_terms):
+            continue
+
+        filtered_jobs.append(job)
+
+    return filtered_jobs
 
 
 class JobMatcher:
@@ -36,7 +97,9 @@ class JobMatcher:
         profile: Dict,
         cities: List[str],
         progress_callback=None,
-        force_refresh: bool = False
+        force_refresh: bool = False,
+        job_title: str = "",
+        location: str = ""
     ) -> List[Dict]:
         """
         Complete workflow: scrape → embed → match → rank.
@@ -47,11 +110,14 @@ class JobMatcher:
             cities: List of city names to scrape
             progress_callback: Optional callback function for progress updates
             force_refresh: If True, ignore cache and re-scrape all cities
+            job_title: Optional job-title terms supplied by the user
+            location: Optional location supplied by the user
             
         Returns:
             List of matched jobs with scores, sorted by relevance
         """
         all_jobs = []
+        cities = narrow_cities_by_location(cities, location)
         
         # Step 1: Separate cached vs stale cities
         cached_cities = []
@@ -110,6 +176,18 @@ class JobMatcher:
             
             for city_jobs in results:
                 all_jobs.extend(city_jobs)
+
+        unfiltered_count = len(all_jobs)
+        all_jobs = filter_jobs_by_search(
+            all_jobs,
+            job_title=job_title,
+            location=location
+        )
+
+        if progress_callback and (job_title.strip() or location.strip()):
+            progress_callback(
+                f"Search criteria retained {len(all_jobs)} of {unfiltered_count} jobs."
+            )
         
         if not all_jobs:
             return []
@@ -124,7 +202,10 @@ class JobMatcher:
         if progress_callback:
             progress_callback("Finding best matches...")
         
-        matched_jobs = self.rag_engine.search_jobs(profile, top_k=100)
+        search_profile = dict(profile)
+        search_profile["target_job_title"] = job_title.strip()
+        search_profile["target_location"] = location.strip()
+        matched_jobs = self.rag_engine.search_jobs(search_profile, top_k=100)
         
         # Step 5: Format results
         results = []
