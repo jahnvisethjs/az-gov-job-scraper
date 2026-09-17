@@ -92,7 +92,10 @@ class SearchFilterTests(unittest.TestCase):
         ))
 
         get_cached_jobs.assert_called_once_with("Phoenix")
-        rag.add_jobs.assert_called_once_with([JOBS[0]])
+        indexed_jobs = rag.add_jobs.call_args.args[0]
+        self.assertEqual(len(indexed_jobs), 1)
+        self.assertEqual(indexed_jobs[0]["title"], JOBS[0]["title"])
+        self.assertRegex(indexed_jobs[0]["job_id"], r"^job_[0-9a-f]{24}$")
         search_profile = rag.search_jobs.call_args.args[0]
         self.assertEqual(search_profile["target_job_title"], "software engineer")
         self.assertEqual(search_profile["target_location"], "Phoenix, Arizona")

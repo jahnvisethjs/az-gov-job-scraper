@@ -102,7 +102,7 @@ class NeoGovParserTests(unittest.TestCase):
         )
 
         self.assertEqual(len(jobs), 1)
-        self.assertEqual(jobs[0].job_id, "neogov:tempe:12345")
+        self.assertRegex(jobs[0].job_id, r"^job_[0-9a-f]{24}$")
         self.assertEqual(jobs[0].location, "Tempe, AZ")
         self.assertEqual(jobs[0].department, "Technology Services")
         self.assertEqual(jobs[0].job_type, "Full-Time")
@@ -198,10 +198,8 @@ class NeoGovFlowTests(unittest.TestCase):
         scraper._fetch_text = fake_fetch
         jobs = asyncio.run(scraper._scrape_with_session(object()))
 
-        self.assertEqual([job.job_id for job in jobs], [
-            "neogov:tempe:100",
-            "neogov:tempe:200",
-        ])
+        self.assertEqual(len({job.job_id for job in jobs}), 2)
+        self.assertTrue(all(job.job_id.startswith("job_") for job in jobs))
         self.assertTrue(all(job.requirements for job in jobs))
         self.assertTrue(all(job.description for job in jobs))
         self.assertEqual(jobs[0].raw_data["job_number"], "T-100")

@@ -17,6 +17,7 @@ from utils.job_cache import (
     save_cached_jobs,
     get_cache_age
 )
+from job_identity import deduplicate_jobs
 
 
 _LOCATION_NOISE_WORDS = {"arizona", "az", "city", "of", "state", "county", "town"}
@@ -177,6 +178,7 @@ class JobMatcher:
             for city_jobs in results:
                 all_jobs.extend(city_jobs)
 
+        all_jobs = deduplicate_jobs(all_jobs)
         unfiltered_count = len(all_jobs)
         all_jobs = filter_jobs_by_search(
             all_jobs,

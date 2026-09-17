@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urljoin, urlsplit, urlunsplit
 import aiohttp
 from bs4 import BeautifulSoup
 
+from job_identity import canonicalize_job_url as canonicalize_url
 from .base_scraper import BaseJobScraper, JobData, JobPortalError
 
 
@@ -108,7 +109,7 @@ class NeoGovScraper(BaseJobScraper):
 
             new_jobs = 0
             for job in page_jobs:
-                key = job.job_id or self.canonicalize_job_url(job.url)
+                key = job.job_id
                 if key not in jobs_by_key:
                     jobs_by_key[key] = job
                     new_jobs += 1
@@ -228,10 +229,10 @@ class NeoGovScraper(BaseJobScraper):
             if not title or not job_url or not posting_id:
                 continue
 
-            stable_id = f"neogov:{agency_code.lower()}:{posting_id}"
-            if stable_id in seen_keys:
+            posting_key = f"{agency_code.lower()}:{posting_id}"
+            if posting_key in seen_keys:
                 continue
-            seen_keys.add(stable_id)
+            seen_keys.add(posting_key)
 
             meta_items = item.select("ul.list-meta > li")
             location = (
@@ -272,7 +273,6 @@ class NeoGovScraper(BaseJobScraper):
                     location=location or city_name,
                     department=department,
                     salary=salary,
-                    job_id=stable_id,
                     job_type=job_type,
                     raw_data={
                         "platform": "NeoGov",
@@ -371,13 +371,7 @@ class NeoGovScraper(BaseJobScraper):
     @staticmethod
     def canonicalize_job_url(url: str) -> str:
         """Remove tracking parameters/fragments without changing posting identity."""
-        if not url:
-            return ""
-        parsed = urlsplit(url)
-        path = parsed.path.rstrip("/") or "/"
-        return urlunsplit(
-            (parsed.scheme.lower(), parsed.netloc.lower(), path, "", "")
-        )
+        return canonicalize_url(url)
 
     @staticmethod
     def _extract_posting_id(value: str) -> str:

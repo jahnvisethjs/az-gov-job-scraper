@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from pathlib import Path
 from config import CACHE_DIR, JOB_CACHE_HOURS
+from job_identity import deduplicate_jobs
 
 
 def _get_cache_dir() -> Path:
@@ -67,7 +68,7 @@ def get_cached_jobs(city: str) -> Optional[List[Dict]]:
     try:
         with open(cache_file, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data.get("jobs", [])
+        return deduplicate_jobs(data.get("jobs", []))
     except (json.JSONDecodeError, FileNotFoundError):
         return None
 
@@ -81,11 +82,12 @@ def save_cached_jobs(city: str, jobs: List[Dict]):
         jobs: List of job dictionaries
     """
     cache_file = _city_cache_path(city)
+    normalized_jobs = deduplicate_jobs(jobs)
     data = {
         "city": city,
         "cached_at": datetime.now().isoformat(),
-        "job_count": len(jobs),
-        "jobs": jobs
+        "job_count": len(normalized_jobs),
+        "jobs": normalized_jobs
     }
     
     with open(cache_file, "w", encoding="utf-8") as f:
