@@ -19,6 +19,7 @@ from config import (
 import os
 from pathlib import Path
 from rag.asu_ai_provider import ASUAIProvider
+from job_identity import deduplicate_jobs
 
 
 def prepare_job_text(job: Dict) -> str:
@@ -157,10 +158,7 @@ def calculate_keyword_overlap(job: Dict, profile: Dict) -> float:
 
 def _compute_jobs_hash(jobs: List[Dict]) -> str:
     """Compute a content hash for a list of jobs to detect changes."""
-    job_ids = sorted([
-        j.get("job_id") or f"{j.get('city', '')}_{j.get('title', '')}" 
-        for j in jobs
-    ])
+    job_ids = sorted(job["job_id"] for job in deduplicate_jobs(jobs))
     return hashlib.md5("|".join(job_ids).encode()).hexdigest()
 
 
@@ -237,6 +235,8 @@ class JobRAG:
         """
         if not jobs:
             return 0
+
+        jobs = deduplicate_jobs(jobs)
         
         # Check if we already have these exact jobs indexed
         new_hash = _compute_jobs_hash(jobs)
@@ -252,13 +252,11 @@ class JobRAG:
         ids = []
         metadatas = []
         
-        for i, job in enumerate(jobs):
+        for job in jobs:
             job_text = prepare_job_text(job)
             documents.append(job_text)
             
-            # Create unique ID
-            job_id = job.get("job_id") or f"{job.get('city', 'unknown')}_{i}"
-            ids.append(job_id)
+            ids.append(job["job_id"])
             
             # Flatten metadata - ChromaDB doesn't support nested dicts
             metadata = {}

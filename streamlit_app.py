@@ -27,6 +27,7 @@ from utils import (
     clear_cache
 )
 from rag import ResumeParser
+from job_identity import ensure_job_id
 from config import (
     AREAS_OF_INTEREST,
     DEGREE_OPTIONS,
@@ -650,9 +651,10 @@ def main():
         if len(filtered_jobs) == 0:
             st.info("No jobs match your current filters. Try lowering the minimum score.")
         else:
-            for i, job in enumerate(filtered_jobs):
+            for job in filtered_jobs:
+                job_id = ensure_job_id(job)
                 # Check if tailoring advice has been generated
-                advice_key = f"advice_{job.get('job_id', '')}"
+                advice_key = f"advice_{job_id}"
                 has_tailoring = advice_key in st.session_state
 
                 # Render card HTML
@@ -667,22 +669,25 @@ def main():
                     if job.get('url'):
                         st.link_button("🔗 Apply Now", job['url'], use_container_width=True)
                 with btn_col2:
-                    tailor_key = f"show_advice_{i}"
+                    tailor_key = f"show_advice_{job_id}"
                     if tailor_key not in st.session_state:
                         st.session_state[tailor_key] = False
 
-                    if st.button("💡 Get Tailoring Advice", key=f"btn_advice_{i}", use_container_width=True):
+                    if st.button(
+                        "💡 Get Tailoring Advice",
+                        key=f"btn_advice_{job_id}",
+                        use_container_width=True,
+                    ):
                         st.session_state[tailor_key] = not st.session_state[tailor_key]
                         st.rerun()
                 with btn_col3:
-                    if st.button("🗑️", key=f"btn_clear_{i}", help="Dismiss"):
+                    if st.button("🗑️", key=f"btn_clear_{job_id}", help="Dismiss"):
                         from utils import dismiss_job
-                        identifier = job.get("job_id") or job.get("title")
-                        dismiss_job(identifier)
+                        dismiss_job(job_id)
                         st.rerun()
 
                 # Show tailoring advice if toggled
-                if st.session_state.get(f"show_advice_{i}", False):
+                if st.session_state.get(tailor_key, False):
                     display_tailoring_advice(job, api_key)
 
                 st.markdown("<div style='margin-bottom: 0.5rem;'></div>", unsafe_allow_html=True)
@@ -691,7 +696,7 @@ def main():
 def display_tailoring_advice(job: Dict, api_key: str):
     """Display personalized tailoring advice for a job."""
 
-    advice_cache_key = f"advice_{job.get('job_id', '')}"
+    advice_cache_key = f"advice_{ensure_job_id(job)}"
 
     # Check cache
     if advice_cache_key not in st.session_state:

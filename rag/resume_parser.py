@@ -1,6 +1,4 @@
-"""
-Resume parser using ASU AI (gpt-4o) to extract structured data from resume text.
-"""
+"""Resume parser using the configured ASU AI model."""
 import json
 from typing import Dict
 import asyncio
@@ -11,21 +9,22 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rag.asu_ai_provider import ASUAIProvider
+from config import ASU_AI_MODEL
 
 
 class ResumeParser:
-    """Parse resume text into structured data using ASU AI (gpt-4o)."""
+    """Parse resume text into structured data using ASU AI."""
     
-    def __init__(self, api_key: str = None, model_name: str = "gpt-4o"):
+    def __init__(self, api_key: str = None, model_name: str = None):
         """
         Initialize resume parser with ASU AI.
         
         Args:
             api_key: ASU AI API key (optional, uses environment variable if not provided)
-            model_name: Model to use (default: gpt-4o)
+            model_name: Optional model override (defaults to config.ASU_AI_MODEL)
         """
-        self.provider = ASUAIProvider(api_key=api_key, model=model_name)
-        self.model_name = model_name
+        self.model_name = model_name or ASU_AI_MODEL
+        self.provider = ASUAIProvider(api_key=api_key, model=self.model_name)
     
     async def parse_resume(self, resume_text: str) -> Dict:
         """

@@ -1,26 +1,28 @@
 # 🏛️ Arizona Government Job Scraper
 
-AI-powered job matching platform that scrapes 15+ Arizona city and county government job sites, uses RAG (Retrieval-Augmented Generation) for semantic matching, and provides personalized resume tailoring advice.
+AI-powered job matching platform that scrapes 14 Arizona city and county government job portals, uses a RAG (Retrieval-Augmented Generation) pipeline with ASU AI embeddings for semantic job matching, and provides personalized resume tailoring advice — all via the ASU AIML API.
 
 ## ✨ Features
 
-- **🤖 AI-Powered Matching**: Gemini 1.5 Flash for resume parsing and job analysis
-- **🎯 Smart Resume Parsing**: Extracts skills, experience, education, and projects automatically
-- **📊 Match Scores**: AI-calculated match scores (0-100%) for each job
-- **💡 Tailoring Advice**: Personalized tips to improve your resume for specific jobs
-- **🏛️ 15 Cities**: Scrapes Arizona government job sites including Phoenix, Tempe, Mesa, Scottsdale, and more
-- **🔒 Session-Based**: No database, no authentication - data lives in your browser session
+- **🤖 AI-Powered Matching**: ASU AIML API (GPT-4o) for resume parsing and tailoring advice
+- **🔢 Semantic Embeddings**: ASU AI `text-embedding-3-small` (1024 dimensions) for vector search
+- **🎯 Smart Resume Parsing**: Extracts skills, experience, education, projects, and certifications automatically
+- **📊 Hybrid Match Scores**: 70% semantic similarity + 30% keyword overlap, scored 0–100
+- **💡 Tailoring Advice**: Personalized per-job tips (strengths, skill gaps, keywords, improvements)
+- **🏛️ 14 Cities**: Scrapes Arizona government job portals via NeoGov and PeopleSoft adapters
+- **⚡ Job Cache**: Scraped jobs cached to disk (6-hour TTL) to avoid redundant scraping
+- **🔒 Session-Based**: No user database or authentication — data lives in your browser session
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
 - Python 3.10+
-- Gemini API Key ([Get one free here](https://makersuite.google.com/app/apikey))
+- ASU AIML API Key
 
 ### Installation
 
-1. **Clone or navigate to the project**
+1. **Navigate to the project**
    ```bash
    cd az-gov-job-scraper
    ```
@@ -28,10 +30,10 @@ AI-powered job matching platform that scrapes 15+ Arizona city and county govern
 2. **Create virtual environment**
    ```bash
    python -m venv venv
-   
+
    # Windows
    venv\Scripts\activate
-   
+
    # Mac/Linux
    source venv/bin/activate
    ```
@@ -43,16 +45,14 @@ AI-powered job matching platform that scrapes 15+ Arizona city and county govern
 
 4. **Install Playwright browsers** (for web scraping)
    ```bash
-   playwright install
+   playwright install chromium
    ```
 
 5. **Set up environment variables**
    ```bash
-   # Copy the example file
    cp .env.example .env
-   
-   # Edit .env and add your API key
-   GEMINI_API_KEY=your_actual_api_key_here
+   # Edit .env and add your ASU AI API key
+   ASU_AI_API_KEY=your_actual_api_key_here
    ```
 
 ### Run the App
@@ -65,144 +65,114 @@ The app will open at `http://localhost:8501`
 
 ## 📖 Usage
 
-### Phase 1 (Complete) - Profile Setup ✅
+### Step 1 — Upload Resume
+Upload your resume in PDF, DOCX, or TXT format (max 5MB). The ASU AI API automatically parses it into structured data: skills, experience, education, projects, and certifications.
 
-1. **Upload Resume**: PDF, DOCX, or TXT format (max 5MB)
-2. **Fill Profile**: Name, education level, areas of interest
-3. **AI Analysis**: Gemini automatically parses your resume
-4. **View Results**: See extracted skills, experience, education, and projects
+### Step 2 — Fill Your Profile
+Enter your name, highest education level, and areas of interest. These feed directly into the semantic matching.
 
-### Phase 2 (Complete) - Job Scraping ✅
+### Step 3 — Search Jobs
+Click **Search & Analyze Jobs**. The system will:
+- Check the local disk cache (fresh within 6 hours) for each city
+- Scrape stale cities in parallel (max 3 concurrent browsers)
+- Embed all jobs using ASU AI `text-embedding-3-small`
+- Score matches using the hybrid 70/30 algorithm
+- Display ranked results with color-coded match badges
 
-- Real-time scraping of Arizona government job sites
-- Normalized job data across different platforms
-- Support for NeoGov and PeopleSoft platforms
+### Step 4 — Get Tailoring Advice
+Click **💡 Get Tailoring Advice** on any job card. The ASU AI API generates position-specific advice:
+- ✅ Your Strengths
+- ⚠️ Skill Gaps to Address
+- 🔑 Keywords to Add
+- 📈 Resume Improvements
 
-### Phase 3 (Complete) - RAG Job Matching ✅
-
-- Semantic job matching using ChromaDB vector database
-- AI-powered match scores (0-100%) combining semantic similarity and keyword matching
-- Personalized resume tailoring advice for each job
-- Smart filtering and ranking by relevance
-- On-demand tailoring suggestions powered by Gemini
-
-### Phase 4+ (Planned)
-
-- LangGraph agent workflows
-- MCP tool servers
-- Enhanced UI with job tracking
+Advice is cached per job in your session — clicking again retrieves it instantly.
 
 ## 🏗️ Project Structure
 
 ```
 az-gov-job-scraper/
-├── streamlit_app.py          # Main Streamlit application
-├── config.py                 # Configuration (cities, API settings)
-├── requirements.txt          # Python dependencies
-├── .env.example              # Environment template
-│
-├── utils/
-│   ├── pdf_extractor.py      # PDF/DOCX text extraction
-│   └── session_manager.py    # Streamlit session state
+├── streamlit_app.py          # Main Streamlit UI
+├── config.py                 # All configuration (cities, models, cache settings)
+├── requirements.txt
+├── .env.example
 │
 ├── rag/
-│   ├── resume_parser.py      # AI resume parsing
-│   └── rag_engine.py         # (Phase 3) ChromaDB + embeddings
+│   ├── asu_ai_provider.py    # ASU AIML API client (LLM + embeddings)
+│   ├── rag_engine.py         # ChromaDB vector store + hybrid scoring
+│   ├── job_matcher.py        # Orchestrates scraping → embedding → matching
+│   ├── resume_parser.py      # AI resume parsing via ASU AI
+│   └── llm_helper.py         # Sync helper wrapper
 │
-├── scrapers/                 # (Phase 2) Web scrapers
-│   ├── base_scraper.py
-│   └── ...
+├── scrapers/
+│   ├── base_scraper.py       # Abstract base class + JobData schema
+│   ├── neogov_scraper.py     # NeoGov (governmentjobs.com) adapter
+│   ├── peoplesoft_scraper.py # PeopleSoft (Phoenix) adapter
+│   └── scraper_registry.py  # City → scraper mapping + platform detection
 │
-└── agents/                   # (Phase 4) LangGraph workflows
-    └── ...
+├── utils/
+│   ├── job_cache.py          # Disk-based public job-listing cache
+│   ├── session_manager.py    # Streamlit session state helpers
+│   └── pdf_extractor.py      # PDF/DOCX text extraction
+│
+└── data/cache/               # Auto-created: cached job JSON files
 ```
-
-## 🎓 Learning Objectives
-
-This project teaches:
-
-- ✅ **Resume Parsing**: AI-powered data extraction from documents
-- ✅ **Streamlit**: Building interactive web UIs with Python
-- ✅ **Session Management**: Stateful applications without databases
-- 🔲 **Web Scraping**: Playwright, BeautifulSoup, multi-site strategies
-- 🔲 **RAG**: Vector embeddings, ChromaDB, semantic search
-- 🔲 **LangGraph**: Agent workflows, tool use, state machines
-
-## 🔑 API Key Setup
-
-### Get Gemini API Key (Free)
-
-1. Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
-2. Sign in with your Google account
-3. Click "Get API Key"
-4. Copy the key and add to `.env`
-
-### Free Tier Limits
-
-- 15 requests/minute
-- 1,500 requests/day
-- 1M tokens/day
-
-The app automatically handles rate limiting!
 
 ## 🏛️ Supported Cities
 
-- City of Phoenix
-- City of Tempe
-- City of Mesa
-- City of Scottsdale
-- Apache Junction
-- Cottonwood
-- Pima County
-- Buckeye
-- Goodyear
-- Snowflake
-- City of Prescott
-- Flagstaff
-- Nogales
-- El Mirage
-- Avondale
+These cities are configured in `ScraperRegistry` and actively scraped:
+
+| City | Platform | Portal |
+|------|----------|--------|
+| Phoenix | PeopleSoft | hcmprod.phoenix.gov |
+| Tempe | NeoGov | governmentjobs.com/careers/tempe |
+| Mesa | NeoGov | governmentjobs.com/careers/mesaaz |
+| Scottsdale | NeoGov | governmentjobs.com/careers/scottsdaleaz |
+| Pima County | NeoGov | governmentjobs.com/careers/pima |
+| Apache Junction | NeoGov | governmentjobs.com/careers/apachejunctionaz |
+| Avondale | NeoGov | governmentjobs.com/careers/avondale |
+| Buckeye | NeoGov | governmentjobs.com/careers/buckeyeaz |
+| Flagstaff | NeoGov | governmentjobs.com/careers/flagstaffaz |
+| Goodyear | NeoGov | governmentjobs.com/careers/goodyearaz |
+| Prescott | NeoGov | governmentjobs.com/careers/prescott |
+| Cottonwood | NeoGov | governmentjobs.com/careers/cottonwoodaz |
+| Chandler | NeoGov | governmentjobs.com/careers/chandleraz |
+| Gilbert | NeoGov | governmentjobs.com/careers/gilbert |
+| Glendale | NeoGov | governmentjobs.com/careers/glendaleaz |
 
 ## 🛠️ Tech Stack
 
 | Component | Technology |
-|-----------|------------|
+|---|---|
 | **UI** | Streamlit |
-| **AI/LLM** | Google Gemini 1.5 Flash |
+| **LLM (Resume Parsing + Tailoring)** | ASU AIML API → Claude Opus 4.7 |
+| **Embeddings** | ASU AIML API → `text-embedding-3-small` (1024 dims) |
+| **Vector DB** | ChromaDB (cosine similarity, persistent) |
+| **Orchestration** | Direct Python flow through `JobMatcher` and `JobRAG` |
+| **Web Scraping** | Playwright (headless Chromium) + BeautifulSoup4 |
 | **Resume Parsing** | PyPDF2, pdfplumber, python-docx |
-| **Web Scraping** | Playwright, BeautifulSoup4 |
-| **Vector DB** | ChromaDB (Phase 3) |
-| **Orchestration** | LangGraph (Phase 4) |
+| **Job Cache** | Local JSON files (6-hour TTL) |
+
+## ⚙️ Configuration (`.env`)
+
+```bash
+ASU_AI_API_KEY=your_token_here
+ASU_AI_MODEL=claude-opus-4-7           # LLM model for parsing + advice
+ASU_AI_EMBEDDINGS_MODEL=te3s           # text-embedding-3-small
+ASU_AI_EMBEDDINGS_DIMENSIONS=1024
+JOB_CACHE_HOURS=6                      # How long cached jobs stay fresh
+CACHE_DIR=./data/cache
+EMBEDDING_BATCH_WORKERS=2             # Parallel embedding workers
+```
 
 ## 📝 Roadmap
 
-- [x] **Phase 1**: Project setup, resume upload, AI parsing ✅
-- [x] **Phase 2**: Web scraping engine ✅
-- [x] **Phase 3**: RAG implementation ✅
-- [ ] **Phase 4**: LangGraph agents
-- [ ] **Phase 5**: UI polish & job tracking
-
-## 🤝 Contributing
-
-This is a learning project! Feel free to:
-- Add more cities
-- Improve scrapers
-- Enhance AI prompts
-- Optimize match algorithms
-
-## 📄 License
-
-MIT License - feel free to use and modify!
-
-## 🙏 Acknowledgments
-
-- Inspired by [Job-Search-Agent](https://github.com/bhargavi-potu/Job-Search-Agent)
-- Built with Google Gemini AI
-- Uses LangChain ecosystem
+- [x] **Phase 1**: Resume upload + AI parsing ✅
+- [x] **Phase 2**: Multi-city web scraping (NeoGov + PeopleSoft) ✅
+- [x] **Phase 3**: RAG pipeline + hybrid scoring ✅
+- [x] **Phase 4**: Direct job-matching orchestration ✅
+- [ ] **Phase 5**: UI polish, job tracking, application history
 
 ---
 
-**Status**: Phase 3 Complete ✅ | Phase 4 Up Next 🚀
-
 Made with ❤️ for Arizona job seekers
-

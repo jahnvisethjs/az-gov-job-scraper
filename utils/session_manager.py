@@ -6,6 +6,8 @@ import streamlit as st
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
+from job_identity import deduplicate_jobs
+
 
 _UNSET = object()
 
@@ -95,13 +97,13 @@ def is_profile_complete() -> bool:
 
 def store_scraped_jobs(jobs: List[Dict]):
     """Store scraped jobs in session."""
-    st.session_state.scraped_jobs = jobs
+    st.session_state.scraped_jobs = deduplicate_jobs(jobs)
     st.session_state.last_scrape_time = datetime.now()
 
 
 def store_matched_jobs(jobs: List[Dict]):
     """Store matched jobs with scores in session."""
-    st.session_state.matched_jobs = jobs
+    st.session_state.matched_jobs = deduplicate_jobs(jobs)
 
 
 def get_matched_jobs(
@@ -118,35 +120,28 @@ def get_matched_jobs(
     Returns:
         List of matched job dictionaries
     """
-    jobs = st.session_state.matched_jobs
+    jobs = deduplicate_jobs(st.session_state.matched_jobs)
+    st.session_state.matched_jobs = jobs
     
     if min_score is not None:
         jobs = [j for j in jobs if j.get("match_score", 0) >= min_score]
     
-    # Deduplicate jobs based on job_id (keep highest scoring version)
-    seen_ids = {}
-    deduped_jobs = []
-    for job in jobs:
-        job_id = job.get("job_id") or job.get("title")  # Use title as fallback
-        if job_id not in seen_ids:
-            seen_ids[job_id] = True
-            deduped_jobs.append(job)
-    
-    # Sort by match score descending
-    deduped_jobs = sorted(deduped_jobs, key=lambda x: x.get("match_score", 0), reverse=True)
+    # Duplicate records have already retained their highest-scoring version.
+    jobs = sorted(jobs, key=lambda x: x.get("match_score", 0), reverse=True)
     
     if limit is not None:
-        deduped_jobs = deduped_jobs[:limit]
+        jobs = jobs[:limit]
     
-    return deduped_jobs
+    return jobs
 
 
 def dismiss_job(identifier: str):
     """Remove a job from matched_jobs in session state."""
     if "matched_jobs" in st.session_state:
+        jobs = deduplicate_jobs(st.session_state.matched_jobs)
         st.session_state.matched_jobs = [
-            j for j in st.session_state.matched_jobs
-            if (j.get("job_id") or j.get("title")) != identifier
+            job for job in jobs
+            if job["job_id"] != identifier
         ]
 
 

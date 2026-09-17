@@ -7,6 +7,8 @@ from typing import List,Dict, Optional
 from datetime import datetime
 import asyncio
 
+from job_identity import ensure_job_id
+
 
 class JobData:
     """Standardized job data structure."""
@@ -29,17 +31,29 @@ class JobData:
     ):
         self.title = title
         self.city = city
-        self.url = url
+        self.raw_data = dict(raw_data or {})
+        if job_id:
+            self.raw_data.setdefault("source_job_id", job_id)
+
+        identity_record = {
+            "title": title,
+            "city": city,
+            "url": url,
+            "location": location,
+            "department": department,
+            "job_id": job_id,
+            "raw_data": self.raw_data,
+        }
+        self.job_id = ensure_job_id(identity_record)
+        self.url = identity_record["url"]
         self.description = description
         self.location = location
         self.department = department
         self.salary = salary
         self.posted_date = posted_date
         self.closing_date = closing_date
-        self.job_id = job_id
         self.requirements = requirements
         self.job_type = job_type
-        self.raw_data = raw_data or {}
         self.scraped_at = datetime.now().isoformat()
     
     def to_dict(self) -> Dict:

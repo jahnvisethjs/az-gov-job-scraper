@@ -1,39 +1,43 @@
-# Arizona Government Job Scraper - Technical Architecture
+# Arizona Government Job Scraper — Technical Architecture
 
 **Complete System Pipeline & Architecture Documentation**
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
-1. [System Overview](#system-overview)
-2. [Architecture Diagram](#architecture-diagram)
-3. [Data Flow](#data-flow)
-4. [Core Components](#core-components)
-5. [Resume Parsing Pipeline](#resume-parsing-pipeline)
-6. [RAG Engine Architecture](#rag-engine-architecture)
-7. [Job Matching Workflow](#job-matching-workflow)
-8. [Technology Stack](#technology-stack)
-9. [Configuration & Environment](#configuration--environment)
+1. [System Overview](#1-system-overview)
+2. [Architecture Diagram](#2-architecture-diagram)
+3. [Data Flow](#3-data-flow)
+4. [Core Components](#4-core-components)
+5. [Resume Parsing Pipeline](#5-resume-parsing-pipeline)
+6. [RAG Engine & Scoring](#6-rag-engine--scoring)
+7. [Job Scraping & Caching](#7-job-scraping--caching)
+8. [Runtime Orchestration](#8-runtime-orchestration)
+9. [Tech Stack & Configuration](#9-tech-stack--configuration)
 
 ---
 
 ## 1. System Overview
 
 ### Purpose
-AI-powered job search application that matches user resumes with Arizona government job postings using semantic search and LLM-based analysis.
+AI-powered job search application that matches user resumes with Arizona government job postings using semantic embedding search and ASU AI LLM analysis.
 
-### Key Features
-- **Resume Parsing**: Extract structured data from PDFs/DOCX using ASU AI (gpt-4o)
-- **Semantic Job Matching**: ChromaDB vector search with Gemini embeddings
-- **Personalized Advice**: LLM-generated tailoring recommendations
-- **Multi-City Scraping**: Web scraping across 15+ Arizona cities
+### Key Capabilities
+- **Resume Parsing**: Structured data extraction from PDF/DOCX via ASU AIML API (GPT-4o)
+- **Semantic Job Matching**: ChromaDB vector search using ASU AI `text-embedding-3-small` (1024-dim)
+- **Hybrid Scoring**: 70% semantic similarity + 30% keyword overlap, scaled 0–100
+- **Tailoring Advice**: Per-job resume improvement advice via ASU AI
+- **Multi-City Scraping**: Parallel Playwright scraping across NeoGov and PeopleSoft platforms
+- **Disk Cache**: JSON-based job cache with configurable TTL (default 6 hours)
 
 ### User Journey
 ```
-User uploads resume → AI parses skills/experience → 
-Scrapes government jobs → Semantic matching → 
-Ranked results with tailoring advice
+Upload resume → AI parses skills/experience →
+Scrape government job portals (or load from cache) →
+Embed jobs + resume via ASU AI →
+Semantic + keyword hybrid scoring →
+Ranked results with per-job tailoring advice
 ```
 
 ---
@@ -41,241 +45,168 @@ Ranked results with tailoring advice
 ## 2. Architecture Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                      STREAMLIT WEB UI                            │
-│  (streamlit_app.py - User interface & session management)       │
-└─────────┬───────────────────────────────────────────────────────┘
-          │
-          ├──────────────────────────────────────────────┐
-          │                                              │
-┌─────────▼──────────┐                     ┌────────────▼──────────┐
-│  RESUME PARSER     │                     │    JOB SCRAPERS       │
-│  (ASU AI gpt-4o)   │                     │  (Playwright/Selenium)│
-│                    │                     │                       │
-│ • PDF extraction   │                     │ • Multi-city support  │
-│ • Text parsing     │                     │ • Dynamic content     │
-│ • Structured JSON  │                     │ • Error handling      │
-└─────────┬──────────┘                     └────────────┬──────────┘
-          │                                             │
-          │                                             │
-          │                                   ┌─────────▼──────────┐
-          │                                   │   SCRAPED JOBS     │
-          │                                   │   (Raw JSON data)  │
-          │                                   └─────────┬──────────┘
-          │                                             │
-          │                     ┌───────────────────────┘
-          │                     │
-┌─────────▼─────────────────────▼──────────────────────────────────┐
-│                         RAG ENGINE                                │
-│                    (JobRAG + ChromaDB)                            │
-│                                                                   │
-│  ┌──────────────┐     ┌──────────────┐     ┌─────────────────┐  │
-│  │  EMBEDDINGS  │────▶│  CHROMA DB   │────▶│  SEMANTIC       │  │
-│  │   (Gemini)   │     │ Vector Store │     │  SEARCH         │  │
-│  └──────────────┘     └──────────────┘     └─────────────────┘  │
-│                                                                   │
-│  ┌──────────────┐     ┌──────────────┐                          │
-│  │   JOB TEXT   │────▶│ RESUME TEXT  │                          │
-│  │ prepare_job  │     │prepare_resume│                          │
-│  └──────────────┘     └──────────────┘                          │
-└──────────────────────────────┬────────────────────────────────────┘
-                               │
-
-### Complete Request Flow
-
-#### **Step 1: User Profile Creation**
+┌──────────────────────────────────────────────────────────────┐
+│                     STREAMLIT WEB UI                          │
+│              (streamlit_app.py)                               │
+└──────────┬───────────────────────────────────────────────────┘
+           │
+           ├─────────────────────────────────┐
+           │                                 │
+┌──────────▼──────────┐         ┌────────────▼──────────────┐
+│   RESUME PARSER      │         │     JOB MATCHER            │
+│  (rag/resume_parser) │         │   (rag/job_matcher.py)     │
+│                      │         │                            │
+│  ASU AI → GPT-4o     │         │ Orchestrates:              │
+│  Structured JSON     │         │  cache check → scrape →    │
+│  output              │         │  embed → score → rank      │
+└──────────┬──────────┘         └────────────┬──────────────┘
+           │                                 │
+           │              ┌──────────────────┤
+           │              │                  │
+           │   ┌──────────▼──────┐  ┌───────▼────────────┐
+           │   │  SCRAPER LAYER  │  │    JOB CACHE        │
+           │   │  (scrapers/)    │  │  (utils/job_cache)  │
+           │   │                 │  │                     │
+           │   │  NeoGovScraper  │  │  JSON files on disk │
+           │   │  PeopleSoft     │  │  6-hour TTL         │
+           │   │  Playwright     │  │  Per-city files     │
+           │   └──────────┬──────┘  └───────┬────────────┘
+           │              │                  │
+           │              └──────────────────┘
+           │                       │
+           │               All scraped jobs
+           │                       │
+┌──────────▼───────────────────────▼───────────────────────────┐
+│                         RAG ENGINE                             │
+│                    (rag/rag_engine.py)                         │
+│                                                                │
+│  ┌──────────────────┐    ┌──────────────┐    ┌─────────────┐ │
+│  │   ASU AI         │───▶│  ChromaDB    │───▶│   Hybrid    │ │
+│  │  text-embedding  │    │  Vector Store│    │   Scoring   │ │
+│  │   -3-small       │    │  cosine sim  │    │  70% + 30%  │ │
+│  │  (1024 dims)     │    │  persistent  │    │             │ │
+│  └──────────────────┘    └──────────────┘    └─────────────┘ │
+└──────────────────────────────────────────────────────────────┘
+                                  │
+                    ┌─────────────▼──────────────┐
+                    │      TAILORING ADVISOR       │
+                    │   (rag/job_matcher.py)        │
+                    │   ASU AI → GPT-4o             │
+                    │   Cached per job_id           │
+                    └────────────────────────────┘
 ```
-User Input (Streamlit) 
+
+---
+
+## 3. Data Flow
+
+### Step 1 — Resume Upload & Parsing
+```
+User uploads PDF/DOCX/TXT
     ↓
-Session State (utils/session.py)
+ResumeExtractor (PyPDF2 / pdfplumber / python-docx)
     ↓
-Profile Dictionary:
+Raw plain text
+    ↓
+[Session check: reuse parse when this session already processed the same resume]
+    ↓ (new resume or no successful parse)
+ASU AIML API  POST https://api-main.aiml.asu.edu/query
+    model: gpt-4o
+    prompt: structured JSON extraction template
+    ↓
+Parsed resume:
 {
-    "name": str,
-    "degree": str,
-    "interests": List[str],
-    "resume_text": str,
-    "resume_filename": str,
-    "resume_parsed": Dict  # Filled after parsing
-}
-```
-
-#### **Step 2: Resume Parsing**
-```
-Raw Resume (PDF/DOCX)
-    ↓
-ResumeExtractor.extract_text() → Plain text
-    ↓
-ASU AI gpt-4o API Call
-    URL: https://api-main.aiml.asu.edu/query
-    Payload: {
-        "prompt": "Extract skills from: ...",
-        "model": "gpt-4o"
-    }
-    ↓
-Structured JSON Response:
-{
-    "skills": [...],
-    "experience": [{...}],
-    "education": [{...}],
-    "projects": [{...}],
-    "certifications": [...],
-    "summary": str
-}
-```
-
-#### **Step 3: Job Scraping**
-```
-Selected Cities (User input)
-    ↓
-ScraperRegistry.get_scraper(city)
-    ↓
-Playwright/Selenium Automation
-    • Navigate to city career page
-    • Extract job listings
-    • Parse HTML content
-    ↓
-Raw Job Data:
-{
-    "title": str,
-    "city": str,
-    "department": str,
-    "description": str,
-    "requirements": str,
-    "salary": str,
-    "url": str,
-    "job_id": str
-}
-```
-
-#### **Step 4: Vector Embedding & Storage**
-```
-Job Data
-    ↓
-prepare_job_text() → Formatted text
-{
-    "Title: Software Engineer\n\n
-     Department: IT\n\n
-     Description: ...\n\n
-     Requirements: ..."
+  "skills": [...],
+  "experience": [{title, company, duration, description}],
+  "education": [{degree, field, institution, year}],
+  "projects": [{name, description, technologies}],
+  "certifications": [...],
+  "summary": "..."
 }
     ↓
-Gemini Embedding API
-    Model: models/embedding-001
-    Task: retrieval_document
-    ↓
-Vector: [0.123, -0.456, 0.789, ...] (768 dimensions)
-    ↓
-ChromaDB.collection.add()
-    • document: job_text
-    • embedding: vector
-    • metadata: job dictionary
-    • id: unique job_id
+Stored only in st.session_state["user_profile"]["resume_parsed"]
 ```
 
-#### **Step 5: Semantic Search**
+### Step 2 — Job Scraping & Caching
 ```
-User Profile
+User clicks Search
     ↓
-prepare_resume_text() → Formatted resume
-{
-    "Interests: GIS, Data Analysis\n\n
-     Skills: Python, R, ArcGIS\n\n
-     Experience: ...\n\n
-     Education: ..."
-}
+For each city in ScraperRegistry:
+    is_cache_fresh(city)?  →  YES → load from data/cache/jobs_{city}.json
+                           →  NO  → scrape with Playwright (max 3 concurrent)
+                                     ↓
+                                   scraper.scrape_with_retry(max_retries=2)
+                                     ↓
+                                   save_cached_jobs(city, jobs)
     ↓
-Gemini Embedding API → Resume vector
-    ↓
-ChromaDB.collection.query()
-    query_embeddings: [resume_vector]
-    n_results: 50
-    ↓
-Results with cosine similarity distances
-    [
-        (job_metadata, distance: 0.15),
-        (job_metadata, distance: 0.23),
-        ...
-    ]
+All jobs merged into single list
 ```
 
-#### **Step 6: Scoring & Ranking**
+### Step 3 — Embedding & Vector Storage
 ```
 For each job:
-    semantic_score = 1 - cosine_distance  # 0.85
-    keyword_overlap = calculate_overlap()  # 0.70
-    
-    final_score = (0.7 * semantic_score) + (0.3 * keyword_overlap)
-    final_score = final_score * 100  # Convert to 0-100 scale
-    
-    if final_score >= MIN_THRESHOLD:
-        matched_jobs.append((job, final_score))
-
-Sort by score (desc) → Return top N jobs
+    prepare_job_text(job) → "Title: ...\n\nDepartment: ...\n\nDescription: ..."
+    ↓
+ASU AI generate_embeddings_batch()
+    model: text-embedding-3-small (te3s)
+    dimensions: 1024
+    parallel workers: EMBEDDING_BATCH_WORKERS (default: 2)
+    ↓
+[Content hash check — skip rebuild if same jobs already indexed]
+    ↓
+ChromaDB collection.add(documents, embeddings, ids, metadatas)
+    collection: "jobs"
+    distance metric: cosine
 ```
 
-#### **Step 7: Display & Advice**
+### Step 4 — Semantic Search & Hybrid Scoring
 ```
-Matched Jobs (with scores)
+prepare_resume_text(profile)
+    → "Interests: ...\n\nEducation: ...\n\nSkills: ...\n\nExperience: ..."
     ↓
-Streamlit UI Display
-    • Job cards with match badges
-    • Expandable details
-    • Apply buttons
+ASU AI generate_embedding_sync() → 1024-dim resume vector
     ↓
-User clicks "Get Tailoring Advice"
+ChromaDB.collection.query(query_embeddings=[resume_vec], n_results=100)
+    → returns (job_metadata, cosine_distance) pairs
     ↓
-TailoringAdvisor.generate_advice()
-    ASU AI gpt-4o:
-    "Job: {job_description}
-     Resume: {user_skills}
-     Provide: strengths, gaps, keywords"
+For each result:
+    semantic_similarity = 1.0 - cosine_distance
+    keyword_score = matched_profile_keywords / total_profile_keywords
+    final_score = (0.7 × semantic_similarity + 0.3 × keyword_score) × 100
     ↓
-Personalized Advice JSON:
-{
-    "strengths": ["Strong GIS background", ...],
-    "skill_gaps": ["Need SQL experience", ...],
-    "keywords": ["spatial analysis", "data viz"],
-    "improvements": [...]
-}
+Filter by MIN_MATCH_SCORE_THRESHOLD (default: 0 — show all)
+Sort descending → return ranked list
+```
+
+### Step 5 — Tailoring Advice
+```
+User clicks "Get Tailoring Advice" on a job card
+    ↓
+[Check st.session_state[f"advice_{job_id}"]]  → cached → display immediately
+    ↓ (cache miss)
+TailoringAdvisor.generate_advice(job, profile)
+    ASU AI GPT-4o prompt:
+        - Job details (title, department, description, requirements)
+        - Candidate skills, education, interests
+        → Returns JSON: {skill_gaps, keywords, improvements, strengths}
+    ↓
+Stored in st.session_state for instant re-display
 ```
 
 ---
 
 ## 4. Core Components
 
-### 4.1 Frontend: Streamlit Application (`streamlit_app.py`)
+### 4.1 `streamlit_app.py` — Frontend
 
 **Responsibilities:**
-- User interface rendering
-- Session state management
-- File upload handling
-- Progress tracking
-- Results display
+- Single-page Streamlit UI with dark theme (GitHub-style color palette)
+- File upload, profile form, search controls (min score slider, max jobs slider)
+- Renders job cards as raw HTML with color-coded match badges
+- Toggleable tailoring advice panels per job
+- Session cache for parsed resume and tailoring advice
 
-**Key Functions:**
-```python
-def main():
-    # Entry point
-    - Initialize session state
-    - Render sidebar (profile form)
-    - Display main content
-    - Handle job search
-
-def display_job_card(job, index, api_key):
-    # Render individual job
-    - Show match score with color coding
-    - Display job details
-    - Provide apply link
-    - Trigger tailoring advice
-
-def display_tailoring_advice(job, api_key):
-    # Show personalized advice
-    - Generate or retrieve cached advice
-    - Display strengths, gaps, keywords
-```
-
-**Session State Structure:**
+**Key session state keys:**
 ```python
 st.session_state = {
     "profile": {
@@ -283,926 +214,271 @@ st.session_state = {
         "degree": str,
         "interests": List[str],
         "resume_text": str,
-        "resume_parsed": Dict
+        "resume_filename": str,
+        "resume_parsed": Dict    # Set after ASU AI parsing
     },
-    "matched_jobs": List[Dict],
-    "scraped_jobs": List[Dict],
-    "theme": "dark" | "light"
+    "matched_jobs": List[Dict],  # Full ranked results
+    "advice_{job_id}": Dict,     # Cached tailoring advice per job
+    "show_advice_{i}": bool      # Toggle state per card
 }
 ```
 
-### 4.2 Utilities (`utils/`)
+**Score badge logic:**
+| Score | Badge Color |
+|-------|-------------|
+| ≥ 60 | Green (`score-high`) |
+| 40–59 | Yellow (`score-med`) |
+| < 40 | Red (`score-low`) |
 
-#### `session.py`
+---
+
+### 4.2 `rag/asu_ai_provider.py` — ASU AIML API Client
+
+The central API client for all AI operations. Makes all calls to `https://api-main.aiml.asu.edu`.
+
+**Text Generation** (resume parsing, tailoring advice):
 ```python
-def init_session_state():
-    """Initialize all session variables"""
-
-def update_user_profile(**kwargs):
-    """Update profile fields"""
-
-def get_user_profile() -> Dict:
-    """Retrieve current profile"""
-
-def is_profile_complete() -> bool:
-    """Check if ready to search jobs"""
+POST /query
+Headers: Authorization: Bearer {ASU_AI_API_KEY}
+Body: {"prompt": "...", "model": "gpt-4o"}
+Response: {"response": "...", "metadata": {...}}
 ```
 
-#### `resume_extractor.py`
+**Embeddings**:
 ```python
-class ResumeExtractor:
-    @staticmethod
-    def extract_text(file_bytes, filename) -> str:
-        """Extract text from PDF/DOCX/TXT"""
-        if filename.endswith('.pdf'):
-            return extract_from_pdf(file_bytes)
-        elif filename.endswith('.docx'):
-            return extract_from_docx(file_bytes)
-        else:
-            return file_bytes.decode()
+POST /embeddings   (or provider-specific endpoint)
+Body: {
+    "input": "text to embed",
+    "model": "te3s",           # text-embedding-3-small
+    "provider": "openai",
+    "dimensions": 1024
+}
+Response: {"data": [{"embedding": [...1024 floats...]}]}
 ```
 
+Both sync and async variants are implemented. Batch embedding uses `ThreadPoolExecutor` with configurable `max_workers`.
 
+---
+
+### 4.3 `rag/rag_engine.py` — Vector Store & Scoring
+
+**`JobRAG` class responsibilities:**
+- Initializes ChromaDB persistent client at `./chroma_db` (cosine metric)
+- `add_jobs(jobs)`: embeds all jobs in parallel via ASU AI, inserts into ChromaDB
+  - Content-hash check skips redundant rebuilds
+- `search_jobs(profile, top_k)`: embeds resume, queries ChromaDB, applies hybrid scoring
+- `clear_jobs()`: drops and recreates ChromaDB collection
+
+**Scoring formula:**
+```
+semantic_similarity = 1.0 - cosine_distance
+keyword_score       = matched_keywords / total_profile_keywords
+final_score         = (0.7 × semantic_similarity + 0.3 × keyword_score) × 100
+```
+
+---
+
+### 4.4 `scrapers/` — Web Scraping Layer
+
+**`BaseJobScraper` (abstract)**:
+- Defines `scrape_jobs()` (async, abstract) and `get_platform_name()` (abstract)
+- Provides `scrape_with_retry(max_retries=3)` with exponential backoff
+- `JobData` dataclass normalizes all scraped data to a common schema:
+  ```
+  title, city, url, description, location, department,
+  salary, posted_date, closing_date, job_id, requirements,
+  job_type, scraped_at, raw_data
+  ```
+
+**`NeoGovScraper`**: Targets `governmentjobs.com` portals used by ~13 cities.
+
+**`PeopleSoftScraper`**: Targets Phoenix's PeopleSoft portal (`hcmprod.phoenix.gov`).
+
+**`ScraperRegistry`**:
+- `CITY_MAPPINGS` dict: city name → (platform, URL)
+- `get_scraper(city_name)` returns correct scraper instance
+- `get_supported_cities()` lists all configured cities
+- `add_city()` allows runtime extension
+
+**Supported cities (from `CITY_MAPPINGS`):**
+
+Phoenix, Scottsdale, Pima County, Tempe, Mesa, Glendale, Chandler, Gilbert, Apache Junction, Avondale, Buckeye, Flagstaff, Goodyear, Prescott, Cottonwood
+
+---
+
+### 4.5 `utils/job_cache.py` — Disk-Based Job Cache
+
+Persists scraped jobs to `/data/cache/jobs_{city}.json` to avoid redundant Playwright sessions.
+
+| Function | Description |
+|---|---|
+| `is_cache_fresh(city)` | Returns True if cache file exists and is within TTL |
+| `get_cached_jobs(city)` | Returns job list from cache, or None if stale |
+| `save_cached_jobs(city, jobs)` | Writes jobs + timestamp to disk |
+| `get_cache_age(city)` | Returns cache age in hours |
+| `clear_cache(city=None)` | Deletes one city or all cache files |
+
+Parsed resumes are deliberately excluded from the disk cache and remain in the user's Streamlit session only.
+
+**Cache TTL**: Configured via `JOB_CACHE_HOURS` env var (default: 6 hours).
+
+---
+
+### 4.6 Runtime Orchestration
+
+The application does not use a separate agent framework. `streamlit_app.py` calls
+`JobMatcher` directly, and `JobMatcher` coordinates scraping, caching, embedding,
+hybrid scoring, ranking, and on-demand tailoring advice through `JobRAG` and
+`TailoringAdvisor`.
 
 ---
 
 ## 5. Resume Parsing Pipeline
 
-### Architecture
-
 ```
-Resume File (PDF/DOCX)
+PDF / DOCX / TXT file bytes
     ↓
-┌──────────────────────────────┐
-│   ResumeExtractor            │
-│   • PyPDF2 (PDF)             │
-│   • python-docx (DOCX)       │
-└────────────┬─────────────────┘
-             │ Plain text
-             ↓
-┌──────────────────────────────┐
-│   ResumeParser               │
-│   (rag/resume_parser.py)     │
-│                              │
-│  Uses: ASU AI Provider       │
-│  Model: gpt-4o               │
-└────────────┬─────────────────┘
-             │
-             ↓
-┌──────────────────────────────┐
-│   ASU AI gpt-4o API          │
-│   POST /query                │
-│                              │
-│   Prompt: Structured JSON    │
-│   extraction template        │
-└────────────┬─────────────────┘
-             │ JSON response
-             ↓
-┌──────────────────────────────┐
-│   Parsed Resume Data         │
-│   {                          │
-│     "skills": [...],         │
-│     "experience": [...],     │
-│     "education": [...],      │
-│     "projects": [...],       │
-│     "certifications": [...], │
-│     "summary": "..."         │
-│   }                          │
-└──────────────────────────────┘
-```
-
-### Implementation Details
-
-**File: `rag/resume_parser.py`**
-
-```python
-class ResumeParser:
-    def __init__(self, api_key: Optional[str] = None):
-        """Initialize with ASU AI provider"""
-        self.provider = ASUAIProvider(
-            api_key=api_key or os.getenv("ASU_AI_API_KEY"),
-            model="gpt-4o"
-        )
-        self.model_name = "gpt-4o"
-    
-    async def parse_resume(self, resume_text: str) -> Dict:
-        """Parse resume using structured prompt"""
-        
-        # Structured prompt template
-        prompt = f"""
-        You are a resume parser. Extract structured information.
-        
-        Return ONLY a valid JSON object with:
-        {{
-          "skills": ["skill1", "skill2", ...],
-          "experience": [{{
-            "title": "Job Title",
-            "company": "Company Name",
-            "duration": "2020 - 2023",
-            "description": "Responsibilities"
-          }}],
-          "education": [{{
-            "degree": "Bachelor of Science",
-            "field": "Computer Science",
-            "institution": "University",
-            "year": "2020"
-          }}],
-          "projects": [{{
-            "name": "Project Name",
-            "description": "What it does",
-            "technologies": ["Python", "React"]
-          }}],
-          "certifications": ["cert1", "cert2"],
-          "summary": "Professional summary"
-        }}
-        
-        Resume Text:
-        {resume_text[:10000]}
-        
-        Return ONLY the JSON object:
-        """
-        
-        # Call ASU AI
-        response = await self.provider.generate_content(prompt)
-        
-        # Parse JSON from response
-        json_str = extract_json_from_response(response)
-        parsed_data = json.loads(json_str)
-        
-        return parsed_data
-    
-    def parse_resume_sync(self, resume_text: str) -> Dict:
-        """Synchronous wrapper"""
-        return asyncio.run(self.parse_resume(resume_text))
-```
-
-**File: `rag/asu_ai_provider.py`**
-
-```python
-class ASUAIProvider:
-    def __init__(self, api_key: str, model: str = "gpt-4o"):
-        self.api_key = api_key
-        self.base_url = "https://api-main.aiml.asu.edu"
-        self.model = model
-    
-    async def generate_content(
-        self,
-        prompt: str,
-        model: Optional[str] = None
-    ) -> str:
-        """Generate text completion"""
-        
-        url = f"{self.base_url}/query"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "prompt": prompt,
-            "model": model or self.model
-        }
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload) as resp:
-                resp.raise_for_status()
-                result = await resp.json()
-                
-                # ASU AI response format
-                return result["response"]
-```
-
-### Prompt Engineering Strategy
-
-**Key Design Decisions:**
-1. **Explicit JSON Structure**: Template shows exact format expected
-2. **No Markdown**: Instructs model to return ONLY JSON (no ```json blocks)
-3. **Comprehensive Sections**: Covers all resume components
-4. **Fallback Handling**: Empty arrays [] for missing sections
-5. **Token Limit**: Truncates resume to 10K chars to prevent errors
-
----
-
-## 6. RAG Engine Architecture
-
-### Overview
-
-The RAG (Retrieval-Augmented Generation) engine combines vector similarity search with keyword matching for intelligent job recommendations.
-
-### Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                       RAG ENGINE                             │
-│                    (rag/rag_engine.py)                       │
-│                                                              │
-│  ┌────────────────┐          ┌──────────────────┐          │
-│  │  JobRAG Class  │          │   ChromaDB       │          │
-│  │                │          │   Vector Store   │          │
-│  │  • Embeddings  │◄────────▶│                  │          │
-│  │  • Search      │          │  • Collections   │          │
-│  │  • Scoring     │          │  • Persistence   │          │
-│  └────────────────┘          └──────────────────┘          │
-│         │                             │                     │
-│         │                             │                     │
-│         ▼                             ▼                     │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │           DATA FLOW                                 │    │
-│  │                                                     │    │
-│  │  1. add_jobs(jobs) → Embed & Store                │    │
-│  │  2. search_jobs(profile) → Retrieve & Rank        │    │
-│  │  3. get_tailoring_advice() → Generate Advice      │    │
-│  └────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Component Breakdown
-
-#### **6.1 Embedding Generation (Gemini)**
-
-```python
-class JobRAG:
-    def __init__(self, api_key: Optional[str] = None):
-        """Initialize RAG with Gemini embeddings"""
-        self.api_key = api_key or GEMINI_API_KEY
-        
-        # Configure Gemini for embeddings
-        genai.configure(api_key=self.api_key)
-        
-        # Initialize ChromaDB
-        self.chroma_client = chromadb.PersistentClient(
-            path=VECTOR_DB_PATH,
-            settings=Settings(anonymized_telemetry=False)
-        )
-        
-        self.collection = self.chroma_client.get_or_create_collection(
-            name="jobs",
-            metadata={"hnsw:space": "cosine"}  # Cosine similarity
-        )
-    
-    def generate_embedding(self, text: str) -> List[float]:
-        """Generate embedding using Gemini"""
-        result = genai.embed_content(
-            model="models/embedding-001",
-            content=text,
-            task_type="retrieval_document"
-        )
-        return result["embedding"]  # Returns 768-dim vector
-```
-
-**Why Gemini for Embeddings?**
-- ASU AI embeddings endpoint not available yet
-- Hybrid approach: ASU AI for text, Gemini for vectors
-- Proven performance with ChromaDB integration
-
-#### **6.2 Text Preparation**
-
-```python
-def prepare_job_text(job: Dict) -> str:
-    """Format job for embedding"""
-    parts = []
-    
-    if job.get("title"):
-        parts.append(f"Title: {job['title']}")
-    if job.get("department"):
-        parts.append(f"Department: {job['department']}")
-    if job.get("description"):
-        parts.append(f"Description: {job['description']}")
-    if job.get("requirements"):
-        parts.append(f"Requirements: {job['requirements']}")
-    if job.get("job_type"):
-        parts.append(f"Type: {job['job_type']}")
-    
-    return "\n\n".join(parts)
-
-def prepare_resume_text(profile: Dict) -> str:
-    """Format resume for embedding"""
-    parts = []
-    
-    # Add interests
-    if profile.get("interests"):
-        parts.append(f"Interests: {', '.join(profile['interests'])}")
-    
-    # Add education
-    if profile.get("degree"):
-        parts.append(f"Education: {profile['degree']}")
-    
-    # Parse resume data
-    resume_data = profile.get("resume_parsed", {})
-    
-    # Add skills
-    if resume_data.get("skills"):
-        parts.append(f"Skills: {', '.join(resume_data['skills'])}")
-    
-    # Add experience (formatted)
-    if resume_data.get("experience"):
-        exp_texts = []
-        for exp in resume_data["experience"]:
-            exp_text = f"{exp.get('title', '')} at {exp.get('company', '')}"
-            if exp.get("description"):
-                exp_text += f": {exp['description']}"
-            exp_texts.append(exp_text)
-        parts.append(f"Experience:\n" + "\n".join(exp_texts))
-    
-    return "\n\n".join(parts)
-```
-
-**Design Rationale:**
-- Structured format improves embedding quality
-- Hierarchical organization (Title > Department > Description)
-- Consistent formatting for jobs and resumes
-- Includes context labels ("Title:", "Skills:")
-
-#### **6.3 Job Storage**
-
-```python
-def add_jobs(self, jobs: List[Dict]) -> int:
-    """Add jobs to vector database"""
-    
-    documents = []
-    embeddings = []
-    ids = []
-    metadatas = []
-    
-    for i, job in enumerate(jobs):
-        # Prepare text
-        job_text = prepare_job_text(job)
-        documents.append(job_text)
-        
-        # Generate embedding
-        embedding = self.generate_embedding(job_text)
-        embeddings.append(embedding)
-        
-        # Create unique ID
-        job_id = job.get("job_id") or f"{job['city']}_{i}"
-        ids.append(job_id)
-        
-        # Store full job as metadata
-        metadatas.append(job)
-    
-    # Batch insert into ChromaDB
-    self.collection.add(
-        documents=documents,
-        embeddings=embeddings,
-        ids=ids,
-        metadatas=metadatas
-    )
-    
-    return len(jobs)
-```
-
-**ChromaDB Schema:**
-```
-Collection: "jobs"
-├── Document: "Title: Software Engineer\n\nDepartment: IT\n\n..."
-├── Embedding: [0.123, -0.456, ...]  (768 dimensions)
-├── Metadata: {
-│     "title": "Software Engineer",
-│     "city": "Phoenix",
-│     "department": "IT",
-│     "description": "...",
-│     "requirements": "...",
-│     "salary": "$80k-$100k",
-│     "url": "https://...",
-│     "job_id": "phoenix_123"
-│   }
-└── ID: "phoenix_123"
-```
-
-#### **6.4 Semantic Search**
-
-```python
-def search_jobs(
-    self,
-    profile: Dict,
-    top_k: int = 50
-) -> List[Tuple[Dict, float]]:
-    """Search for matching jobs"""
-    
-    # Prepare resume for embedding
-    resume_text = prepare_resume_text(profile)
-    
-    # Generate resume embedding
-    resume_embedding = self.generate_embedding(resume_text)
-    
-    # Query ChromaDB
-    results = self.collection.query(
-        query_embeddings=[resume_embedding],
-        n_results=top_k
-    )
-    
-    # Process results
-    matched_jobs = []
-    
-    if results["metadatas"] and len(results["metadatas"]) > 0:
-        metadatas = results["metadatas"][0]
-        distances = results["distances"][0]
-        
-        for i, job_metadata in enumerate(metadatas):
-            # Convert distance to similarity
-            semantic_similarity = 1.0 - distances[i]
-            
-            # Calculate keyword overlap
-            keyword_score = calculate_keyword_overlap(job_metadata, profile)
-            
-            # Combined score: 70% semantic, 30% keyword
-            final_score = (0.7 * semantic_similarity) + (0.3 * keyword_score)
-            final_score = final_score * 100  # Scale to 0-100
-            
-            if final_score >= MIN_MATCH_SCORE_THRESHOLD:
-                matched_jobs.append((job_metadata, final_score))
-    
-    # Sort by score descending
-    matched_jobs.sort(key=lambda x: x[1], reverse=True)
-    
-    return matched_jobs
-```
-
-**Scoring Algorithm:**
-
-```
-For each job-resume pair:
-
-1. SEMANTIC SIMILARITY (70% weight)
-   - ChromaDB returns cosine distance: 0.15
-   - Convert to similarity: 1 - 0.15 = 0.85
-   
-2. KEYWORD OVERLAP (30% weight)
-   - Extract user skills/interests
-   - Count matches in job description
-   - Score = matches / total_keywords = 0.70
-   
-3. FINAL SCORE
-   - Combined = (0.7 × 0.85) + (0.3 × 0.70)
-   - Combined = 0.595 + 0.210 = 0.805
-   - Scaled = 0.805 × 100 = 80.5%
-
-4. THRESHOLD FILTER
-   - if score >= MIN_THRESHOLD (40%):
-       include in results
-```
-
-**Why Hybrid Scoring?**
-- **Semantic (70%)**: Captures conceptual similarity
-  - "data analysis" ≈ "statistical programming"
-  - "GIS" ≈ "geospatial analysis"
-- **Keyword (30%)**: Ensures explicit matches
-  - Required certifications
-  - Specific tools/technologies
-  - Job-critical terms
-
----
-
-
-
-### What is MCP?
-
-**Model Context Protocol (MCP)** = Standard protocol for external tools to augment LLM capabilities
-
-### Architecture
-
-```
-┌──────────────────────────────────────────────────────────┐
-│               Claude Desktop / External Client            │
-│                 (MCP Client)                              │
-└────────────────────┬─────────────────────────────────────┘
-                     │ stdio communication
-                     │
-┌────────────────────▼─────────────────────────────────────┐
-│           resume_parser_server.py                         │
-│              (MCP Server)                                 │
-│                                                           │
-│  ┌─────────────────────────────────────────────────┐    │
-│  │  TOOLS                                          │    │
-│  │                                                 │    │
-│  │  1. parse_resume                                │    │
-│  │     Input: resume_text                          │    │
-│  │     Output: structured JSON                     │    │
-│  │                                                 │    │
-│  │  2. get_resume_summary                          │    │
-│  │     Input: parsed_resume                        │    │
-│  │     Output: text summary                        │    │
-│  │                                                 │    │
-│  │  3. extract_skills                              │    │
-│  │     Input: resume_text                          │    │
-│  │     Output: skill list                          │    │
-│  └─────────────────────────────────────────────────┘    │
-│                                                           │
-│  Uses: rag/resume_parser.py (ASU AI gpt-4o)             │
-└───────────────────────────────────────────────────────────┘
-```
-
-### Implementation
-
-
-```python
-#!/usr/bin/env python3
-"""MCP Server for Resume Parsing"""
-
-import asyncio
-from mcp.server.fastmcp import FastMCP
-from rag import ResumeParser
-import os
-
-# Initialize MCP server
-mcp = FastMCP("Resume Parser")
-
-@mcp.tool()
-async def parse_resume(resume_text: str) -> dict:
-    """
-    Parse a resume and extract structured information
-    
-    Args:
-        resume_text: The full text content of the resume
-        
-    Returns:
-        Structured resume data with skills, experience, education, etc.
-    """
-    api_key = os.getenv("ASU_AI_API_KEY")
-    if not api_key:
-        raise ValueError("ASU AI API key not found")
-    
-    parser = ResumeParser(api_key)
-    parsed_data = await parser.parse_resume(resume_text)
-    
-    return parsed_data
-
-@mcp.tool()
-async def get_resume_summary(parsed_resume: dict) -> str:
-    """
-    Generate a concise summary from parsed resume data
-    
-    Args:
-        parsed_resume: Structured resume data from parse_resume
-        
-    Returns:
-        Human-readable summary string
-    """
-    summary_parts = []
-    
-    # Skills
-    if parsed_resume.get("skills"):
-        skills = ", ".join(parsed_resume["skills"][:5])
-        summary_parts.append(f"Key Skills: {skills}")
-    
-    # Experience
-    if parsed_resume.get("experience"):
-        years = len(parsed_resume["experience"])
-        summary_parts.append(f"{years} work experiences")
-    
-    # Education
-    if parsed_resume.get("education"):
-        degrees = [edu.get("degree", "Degree") for edu in parsed_resume["education"]]
-        summary_parts.append(f"Education: {', '.join(degrees)}")
-    
-    return " | ".join(summary_parts)
-
-@mcp.tool()
-async def extract_skills(resume_text: str) -> list:
-    """
-    Extract just the skills from a resume
-    
-    Args:
-        resume_text: The full text content of the resume
-        
-    Returns:
-        List of extracted skills
-    """
-    parsed = await parse_resume(resume_text)
-    return parsed.get("skills", [])
-
-if __name__ == "__main__":
-    mcp.run()
-```
-
-### Usage Example
-
-**From Claude Desktop:**
-
-```
-User: "Parse this resume and tell me the key skills"
-
-Claude → Calls MCP tool `parse_resume`:
-    Input: <resume text>
+ResumeExtractor.extract_text(file_bytes, filename)
+    PDF:  PyPDF2 page-by-page + pdfplumber fallback
+    DOCX: python-docx paragraph iteration
+    TXT:  direct decode
     ↓
-MCP Server → Uses ASU AI gpt-4o
+Plain text string (no formatting)
     ↓
-Returns: {
-    "skills": ["Python", "GIS", "R", "SQL"],
-    "experience": [...],
-    ...
-}
+Check whether the same resume has a successful parse in this session
+    ↓ (new resume or no successful parse)
+ResumeParser.parse_resume_sync(text)
     ↓
-Claude: "This resume shows expertise in Python, GIS, R, and SQL..."
+ASUAIProvider.generate_content_sync()
+    POST https://api-main.aiml.asu.edu/query
+    model: gpt-4o
+    prompt: strict JSON extraction template
+            (truncated to 10,000 chars)
+    ↓
+JSON response extracted + parsed
+    ↓
+Stored only in session_state["user_profile"]["resume_parsed"]
 ```
 
-### Configuration
-
-
+**Prompt template enforces** (no markdown, strict JSON only):
 ```json
 {
-  "mcpServers": {
-    "resume-parser": {
-      "command": "python",
-      "env": {
-        "ASU_AI_API_KEY": "${ASU_AI_API_KEY}"
-      }
-    }
-  }
+  "skills": [...],
+  "experience": [{"title", "company", "duration", "description"}],
+  "education": [{"degree", "field", "institution", "year"}],
+  "projects": [{"name", "description", "technologies": [...]}],
+  "certifications": [...],
+  "summary": "..."
 }
 ```
 
-Add to Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`)
+---
+
+## 6. RAG Engine & Scoring
+
+### Embedding Model
+- **Provider**: ASU AIML API (`https://api-main.aiml.asu.edu`)
+- **Model**: `text-embedding-3-small` (abbreviated `te3s` in config)
+- **Dimensions**: 1024 (configurable via `ASU_AI_EMBEDDINGS_DIMENSIONS`)
+- **Batch**: `generate_embeddings_batch()` uses `ThreadPoolExecutor(max_workers=2)`
+
+### ChromaDB Schema
+```
+Collection: "jobs"
+├── Document:  "Title: ...\n\nDepartment: ...\n\nDescription: ...\n\nRequirements: ..."
+├── Embedding: [float × 1024]
+├── Metadata:  full job dict (nested dicts serialized to JSON strings)
+└── ID:        job_id or "{city}_{index}"
+```
+
+### Hybrid Scoring Algorithm
+```python
+semantic_similarity = 1.0 - cosine_distance   # from ChromaDB
+keyword_score = matched_keywords / total_profile_keywords
+final_score = (0.7 * semantic_similarity + 0.3 * keyword_score) * 100
+```
+
+**Keyword source for scoring**: candidate skills + interests (from session profile)
+**Keyword target**: merged `title + description + requirements` of the job (lowercase)
+
+### Smart Rebuild Skip
+Before re-embedding, `add_jobs()` computes an MD5 hash of all job IDs. If the hash matches the last-indexed batch AND ChromaDB count matches, the rebuild is skipped entirely.
 
 ---
 
-## 8. Job Matching Workflow
+## 7. Job Scraping & Caching
 
-### Complete End-to-End Flow
+### Parallel Scraping
+`JobMatcher.match_jobs_to_profile()` separates cities into cached vs stale.
+Stale cities are scraped concurrently with `asyncio.gather()` bounded by `asyncio.Semaphore(3)` — maximum 3 headless browser instances at a time.
 
 ```python
-# File: rag/job_matcher.py
+semaphore = asyncio.Semaphore(3)
 
-class JobMatcher:
-    """Orchestrates the complete job matching workflow"""
-    
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.rag_engine = JobRAG(api_key)
-    
-    async def match_jobs_to_profile(
-        self,
-        profile: Dict,
-        cities: List[str],
-        progress_callback: Optional[Callable] = None
-    ) -> List[Dict]:
-        """Complete matching workflow"""
-        
-        # Step 1: Scrape jobs
-        progress_callback("Scraping jobs from selected cities...")
-        scraped_jobs = await self._scrape_jobs(cities, progress_callback)
-        
-        # Step 2: Add to vector database
-        progress_callback(f"Indexing {len(scraped_jobs)} jobs...")
-        self.rag_engine.add_jobs(scraped_jobs)
-        
-        # Step 3: Semantic search
-        progress_callback("Performing semantic job matching...")
-        matched_jobs = self.rag_engine.search_jobs(profile, top_k=50)
-        
-        # Step 4: Format and return
-        progress_callback(f"Found {len(matched_jobs)} matching jobs!")
-        return matched_jobs
-    
-    async def _scrape_jobs(
-        self,
-        cities: List[str],
-        progress_callback: Callable
-    ) -> List[Dict]:
-        """Scrape jobs from multiple cities"""
-        all_jobs = []
-        
-        for i, city in enumerate(cities):
-            progress_callback(f"Scraping {city} ({i+1}/{len(cities)})...")
-            
-            try:
-                scraper = ScraperRegistry.get_scraper(city)
-                jobs = await scraper.scrape()
-                all_jobs.extend(jobs)
-            except Exception as e:
-                progress_callback(f"Error scraping {city}: {e}")
-                continue
-        
-        return all_jobs
+async def scrape_city(city):
+    async with semaphore:
+        scraper = ScraperRegistry.get_scraper(city)
+        jobs = await scraper.scrape_with_retry(max_retries=2)
+        save_cached_jobs(city, [j.to_dict() for j in jobs])
+        return jobs
+
+results = await asyncio.gather(*[scrape_city(c) for c in stale_cities])
 ```
 
-### Workflow Diagram
-
-```
-START
-  │
-  ▼
-┌─────────────────────┐
-│ User Completes      │
-│ Profile + Resume    │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│ Resume Parsing      │
-│ (ASU AI gpt-4o)     │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│ User Selects Cities │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────────────────────────┐
-│ Job Scraping (Parallel)                 │
-│  • Playwright/Selenium automation       │
-│  • Extract HTML content                 │
-│  • Parse into structured JSON           │
-└──────────┬──────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────┐
-│ Vector Embedding (Gemini)               │
-│  • prepare_job_text()                   │
-│  • generate_embedding()                 │
-│  • Store in ChromaDB                    │
-└──────────┬──────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────┐
-│ Resume Embedding (Gemini)               │
-│  • prepare_resume_text()                │
-│  • generate_embedding()                 │
-└──────────┬──────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────┐
-│ Semantic Search (ChromaDB)              │
-│  • Cosine similarity                    │
-│  • Top-K retrieval                      │
-└──────────┬──────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────┐
-│ Hybrid Scoring                          │
-│  • 70% semantic similarity              │
-│  • 30% keyword overlap                  │
-│  • Apply threshold filter               │
-└──────────┬──────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────┐
-│ Ranked Results Display                  │
-│  • Sort by score                        │
-│  • Color-coded badges                   │
-│  • Expandable job cards                 │
-└──────────┬──────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────┐
-│ Tailoring Advice (Optional)             │
-│  • ASU AI gpt-4o                        │
-│  • Personalized recommendations         │
-│  • Keyword suggestions                  │
-└─────────────────────────────────────────┘
-           │
-           ▼
-          END
+### Cache File Format
+`data/cache/jobs_{city_name}.json`:
+```json
+{
+  "city": "Tempe",
+  "cached_at": "2026-04-25T14:30:00",
+  "job_count": 42,
+  "jobs": [{ ...JobData.to_dict()... }]
+}
 ```
 
 ---
 
-## 9. Technology Stack
+## 8. Runtime Orchestration
 
-### Backend
+```
+Streamlit UI → JobMatcher → cache/scrapers → JobRAG → ranked jobs
+                                      └──→ TailoringAdvisor (on demand)
+```
 
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Web Framework** | Streamlit | UI rendering & state management |
-| **LLM (Text)** | ASU AI (gpt-4o) | Resume parsing, advice generation |
-| **LLM (Embeddings)** | Google Gemini | Vector embeddings for semantic search |
-| **Vector DB** | ChromaDB | Persistent vector storage & similarity search |
-| **Web Scraping** | Playwright, Selenium | Dynamic website automation |
-| **PDF Parsing** | PyPDF2 | Extract text from PDF resumes |
-| **DOCX Parsing** | python-docx | Extract text from Word resumes |
-| **Async Runtime** | asyncio, aiohttp | Asynchronous API calls|
-| **Environment** | python-dotenv | Environment variable management |
-
-### Frontend
-
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **UI Components** | Streamlit widgets | Forms, buttons, file upload |
-| **Styling** | Custom CSS | Theme-based styling (dark/light) |
-| **State Management** | st.session_state | Client-side state persistence |
-| **Progress Tracking** | st.progress, st.spinner | User feedback during operations |
-
-### Infrastructure
-
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Package Management** | pip, requirements.txt | Dependency management |
-| **Version Control** | Git | Code versioning |
-| **Configuration** | config.py, .env | Centralized settings |
-| **Database Storage** | File system (chroma_db/) | Vector database persistence |
+`JobMatcher.match_jobs_to_profile()` is the primary entry point. It handles the
+scraping/cache decision and delegates vector operations to `JobRAG`. Tailoring
+advice is generated only when the user requests it for a result.
 
 ---
 
-## 10. Configuration & Environment
+## 9. Tech Stack & Configuration
 
-### Environment Variables (`.env`)
+### Tech Stack
 
-```bash
-# LLM Provider Selection
-LLM_PROVIDER=asu_ai
+| Component | Technology |
+|---|---|
+| **UI** | Streamlit (dark theme, Inter font, custom CSS) |
+| **LLM** | ASU AIML API → Claude Opus 4.7 (`claude-opus-4-7`) |
+| **Embeddings** | ASU AIML API → `text-embedding-3-small` (1024 dims) |
+| **Vector DB** | ChromaDB (local persistent, cosine similarity) |
+| **Orchestration** | Direct Python flow through `JobMatcher` and `JobRAG` |
+| **Web Scraping** | Playwright (headless Chromium) + BeautifulSoup4 |
+| **Resume Extraction** | PyPDF2, pdfplumber, python-docx |
+| **Job Cache** | JSON files on disk (TTL-based) |
+| **Async Runtime** | asyncio + `ThreadPoolExecutor` for embeddings |
 
-# ASU AI Configuration
-ASU_AI_ENABLED=true
-ASU_AI_API_KEY=eyJhbGci...  # Your API token
-ASU_AI_MODEL=gpt-4o
-ASU_AI_BASE_URL=https://api-main.aiml.asu.edu
+### Key Configuration Variables (`config.py` / `.env`)
 
-# Gemini Configuration (for embeddings)
-GEMINI_API_KEY=your_gemini_key_here
-```
-
-### Configuration File (`config.py`)
-
-```python
-# LLM Provider
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "asu_ai")
-
-# ASU AI Settings
-ASU_AI_ENABLED = os.getenv("ASU_AI_ENABLED", "true").lower() == "true"
-ASU_AI_API_KEY = os.getenv("ASU_AI_API_KEY", "")
-ASU_AI_BASE_URL = "https://api-main.aiml.asu.edu"
-ASU_AI_MODEL = os.getenv("ASU_AI_MODEL", "gpt-4o")
-
-# Gemini Settings (embeddings)
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_EMBEDDING_MODEL = "models/embedding-001"
-
-# Application Settings
-MAX_RESUME_SIZE_MB = 5
-SUPPORTED_RESUME_FORMATS = [".pdf", ".docx", ".txt"]
-TOP_JOBS_TO_DISPLAY = 50
-MIN_MATCH_SCORE_THRESHOLD = 40
-
-# RAG Settings
-EMBEDDING_CHUNK_SIZE = 500
-VECTOR_DB_PATH = "./chroma_db"
-
-# Supported Cities
-ARIZONA_CITIES = [
-    {"name": "City of Tempe", "url": "...", "state": "enabled"},
-    {"name": "City of Phoenix", "url": "...", "state": "enabled"},
-    # ... more cities
-]
-```
-
-### Directory Structure
-
-```
-az-gov-job-scraper/
-├── streamlit_app.py          # Main application
-├── config.py                  # Configuration
-├── .env                       # Environment variables (gitignored)
-├── .env.example               # Template for .env
-├── requirements.txt           # Python dependencies
-│
-├── rag/                       # RAG & AI modules
-│   ├── __init__.py
-│   ├── resume_parser.py       # ASU AI resume parsing
-│   ├── rag_engine.py          # Vector search engine
-│   ├── job_matcher.py         # Main orchestrator
-│   ├── tailoring_advisor.py   # Advice generation
-│   └── asu_ai_provider.py     # ASU AI API client
-│
-├── scrapers/                  # Web scraping modules
-│   ├── __init__.py
-│   ├── base_scraper.py        # Abstract base class
-│   ├── tempe_scraper.py       # City-specific scrapers
-│   ├── phoenix_scraper.py
-│   └── ...
-│
-├── utils/                     # Utility modules
-│   ├── __init__.py
-│   ├── session.py             # Session management
-│   ├── resume_extractor.py    # PDF/DOCX parsing
-│   └── validators.py          # Input validation
-│
-│   ├── resume_parser_server.py
-│   └── mcp_config.json
-│
-├── chroma_db/                 # ChromaDB persistence (gitignored)
-│   └── ...
-│
-└── data/                      # Temporary data storage
-    └── temp_resumes/          # Uploaded resumes (gitignored)
-```
-
----
-
-## Summary
-
-This Arizona Government Job Scraper uses a modern, AI-powered architecture:
-
-1. **User uploads resume** → Extracted with PyPDF2/python-docx
-2. **Resume parsed** → ASU AI gpt-4o extracts structured data (JSON)
-3. **Jobs scraped** → Playwright/Selenium from 15+ cities
-4. **Jobs embedded** → Gemini embedding-001 creates vectors
-5. **Semantic search** → ChromaDB finds similar jobs via cosine similarity
-6. **Hybrid scoring** → 70% semantic + 30% keyword matching
-7. **Results displayed** → Streamlit UI with match scores
-8. **Tailoring advice** → ASU AI gpt-4o generates personalized tips
-9. **MCP integration** → External tools can access resume parsing
-
-**Key Technologies**: Streamlit • ASU AI (gpt-4o) • Gemini (embeddings) • ChromaDB • Playwright
-
-**Hybrid LLM Strategy**: ASU AI for text generation, Gemini for embeddings (until ASU AI embeddings available)
+| Variable | Default | Description |
+|---|---|---|
+| `ASU_AI_API_KEY` | (required) | Bearer token for ASU AIML API |
+| `ASU_AI_BASE_URL` | `https://api-main.aiml.asu.edu` | API base URL |
+| `ASU_AI_MODEL` | `claude-opus-4-7` | LLM model for text tasks |
+| `ASU_AI_EMBEDDINGS_MODEL` | `te3s` | Embedding model shorthand |
+| `ASU_AI_EMBEDDINGS_DIMENSIONS` | `1024` | Embedding vector size |
+| `EMBEDDING_BATCH_WORKERS` | `2` | Parallel embedding threads |
+| `JOB_CACHE_HOURS` | `6` | Cache TTL in hours |
+| `CACHE_DIR` | `./data/cache` | Cache directory path |
+| `VECTOR_DB_PATH` | `./chroma_db` | ChromaDB persistence path |
+| `MIN_MATCH_SCORE_THRESHOLD` | `0` | Filter threshold (0 = show all) |
+| `TOP_JOBS_TO_DISPLAY` | `50` | Max results from RAG search |
