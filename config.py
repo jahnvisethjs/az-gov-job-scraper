@@ -14,7 +14,7 @@ ASU_AI_API_KEY = os.getenv("ASU_AI_API_KEY", "")
 ASU_AI_BASE_URL = os.getenv("ASU_AI_BASE_URL", "https://api-main.aiml.asu.edu")
 
 # ASU AI Text Generation Model
-ASU_AI_MODEL = os.getenv("ASU_AI_MODEL", "gpt-4o")
+ASU_AI_MODEL = os.getenv("ASU_AI_MODEL", "claude-opus-4-7")
 
 # ASU AI Embeddings Configuration
 ASU_AI_EMBEDDINGS_PROVIDER = os.getenv("ASU_AI_EMBEDDINGS_PROVIDER", "openai")
