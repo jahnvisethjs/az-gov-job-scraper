@@ -33,7 +33,7 @@ wheels/
 # Generated application data
 chroma_db/
 *.chroma
-data/cache/
+data/cache/*
 !data/cache/.gitkeep
 data/temp_resumes/
 

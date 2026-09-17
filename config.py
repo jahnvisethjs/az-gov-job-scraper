@@ -2,7 +2,21 @@
 Configuration file for Arizona city job sites and application settings.
 """
 import os
+from pathlib import Path
 from typing import List, Dict
+
+from dotenv import load_dotenv
+
+
+ENV_FILE = Path(__file__).resolve().with_name(".env")
+
+
+def _load_environment(env_file: Path = ENV_FILE) -> bool:
+    """Load local settings without overriding deployed environment variables."""
+    return load_dotenv(dotenv_path=env_file, override=False)
+
+
+_load_environment()
 
 # =============================================================================
 # LLM Provider Configuration
@@ -109,6 +123,9 @@ SUPPORTED_RESUME_FORMATS = [".pdf", ".docx", ".txt"]
 JOB_CACHE_HOURS = int(os.getenv("JOB_CACHE_HOURS", "6"))  # How long scraped jobs stay fresh
 CACHE_DIR = os.getenv("CACHE_DIR", "./data/cache")  # Cache directory path
 EMBEDDING_BATCH_WORKERS = int(os.getenv("EMBEDDING_BATCH_WORKERS", "2"))  # Parallel embedding workers
+PLAYWRIGHT_SKIP_BROWSER_INSTALL = (
+    os.getenv("PLAYWRIGHT_SKIP_BROWSER_INSTALL", "false").lower() == "true"
+)
 
 # Job Matching Settings
 TOP_JOBS_TO_DISPLAY = 50

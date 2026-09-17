@@ -1,0 +1,290 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
+
+.stApp {
+    background-color: #0d1117 !important;
+    color: #e6edf3 !important;
+    font-family: "Inter", sans-serif !important;
+}
+
+[data-testid="collapsedControl"],
+footer,
+#MainMenu {
+    display: none !important;
+}
+
+.app-header {
+    text-align: center;
+    padding: 2.5rem 0 0.5rem;
+}
+
+.app-header h1 {
+    color: #e6edf3;
+    font-size: 2.4rem;
+    font-weight: 800;
+    margin: 0;
+}
+
+.app-header .subtitle {
+    color: #8b949e;
+    font-size: 1.05rem;
+    font-weight: 400;
+    margin-top: 0.4rem;
+}
+
+.dark-card {
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 12px;
+    margin-bottom: 1.2rem;
+    padding: 1.5rem 1.8rem;
+}
+
+.dark-card h3 {
+    color: #e6edf3;
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin: 0 0 1rem;
+}
+
+.stTextInput > div > div > input {
+    background-color: #0d1117 !important;
+    border: 1px solid #30363d !important;
+    border-radius: 8px !important;
+    color: #e6edf3 !important;
+    font-size: 0.95rem !important;
+    padding: 0.65rem 0.9rem !important;
+}
+
+.stTextInput > label,
+.stSlider > label,
+.stSelectbox > label,
+.stMultiSelect > label {
+    color: #8b949e !important;
+    font-size: 0.9rem !important;
+    font-weight: 500 !important;
+}
+
+.stTextInput > div > div > input:focus {
+    border-color: #388bfd !important;
+    box-shadow: 0 0 0 3px rgba(56, 139, 253, 0.15) !important;
+}
+
+[data-testid="stFileUploader"] {
+    background-color: transparent !important;
+}
+
+[data-testid="stFileUploader"] section {
+    background-color: #0d1117 !important;
+    border: 2px dashed #30363d !important;
+    border-radius: 10px !important;
+    padding: 1rem !important;
+}
+
+[data-testid="stFileUploader"] section:hover {
+    border-color: #388bfd !important;
+}
+
+[data-testid="stFileUploader"] label {
+    color: #8b949e !important;
+}
+
+[data-testid="stFileUploader"] small,
+.stSlider [data-testid="stTickBarMin"],
+.stSlider [data-testid="stTickBarMax"] {
+    color: #6e7681 !important;
+}
+
+.stSlider [data-testid="stThumbValue"] {
+    color: #e6edf3 !important;
+}
+
+.stSlider [data-baseweb="slider"] div[role="slider"] {
+    background-color: #388bfd !important;
+    border-color: #388bfd !important;
+}
+
+.stButton > button[kind="primary"],
+.stButton > button {
+    background: linear-gradient(135deg, #1f6feb 0%, #388bfd 100%) !important;
+    border: none !important;
+    border-radius: 10px !important;
+    color: white !important;
+    font-size: 1.05rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.02em !important;
+    padding: 0.75rem 1.5rem !important;
+    transition: all 0.25s ease !important;
+    width: 100% !important;
+}
+
+.stButton > button:hover {
+    box-shadow: 0 6px 20px rgba(56, 139, 253, 0.35) !important;
+    transform: translateY(-2px) !important;
+}
+
+.stButton > button:active {
+    transform: translateY(0) !important;
+}
+
+.results-header {
+    color: #e6edf3;
+    font-size: 1.5rem;
+    font-weight: 800;
+    margin: 2rem 0 1rem;
+}
+
+.job-card {
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 12px;
+    margin-bottom: 0.9rem;
+    padding: 1.3rem 1.6rem;
+    transition: border-color 0.2s ease;
+}
+
+.job-card:hover {
+    border-color: #388bfd;
+}
+
+.job-card-title {
+    color: #e6edf3;
+    display: inline;
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+.score-badge {
+    border-radius: 12px;
+    display: inline-block;
+    font-size: 0.82rem;
+    font-weight: 700;
+    margin-left: 10px;
+    padding: 2px 10px;
+    vertical-align: middle;
+}
+
+.score-high {
+    background: rgba(63, 185, 80, 0.15);
+    border: 1px solid rgba(63, 185, 80, 0.3);
+    color: #3fb950;
+}
+
+.score-med {
+    background: rgba(210, 153, 34, 0.15);
+    border: 1px solid rgba(210, 153, 34, 0.3);
+    color: #d29922;
+}
+
+.score-low {
+    background: rgba(248, 81, 73, 0.15);
+    border: 1px solid rgba(248, 81, 73, 0.3);
+    color: #f85149;
+}
+
+.job-company {
+    color: #8b949e;
+    font-size: 0.95rem;
+    margin-top: 0.3rem;
+}
+
+.job-location {
+    color: #8b949e;
+    font-size: 0.88rem;
+    margin-top: 0.2rem;
+}
+
+.job-location .pin {
+    color: #f85149;
+}
+
+.status-badge {
+    border-radius: 6px;
+    display: inline-block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-top: 0.5rem;
+    padding: 3px 12px;
+}
+
+.status-tailored {
+    background: rgba(63, 185, 80, 0.15);
+    border: 1px solid rgba(63, 185, 80, 0.3);
+    color: #3fb950;
+}
+
+.keyword-badge {
+    background-color: rgba(56, 139, 253, 0.15);
+    border: 1px solid rgba(56, 139, 253, 0.3);
+    border-radius: 12px;
+    color: #58a6ff;
+    display: inline-block;
+    margin: 4px;
+    padding: 4px 12px;
+}
+
+[data-testid="stAlert"] {
+    background-color: #161b22 !important;
+    border: 1px solid #21262d !important;
+    border-radius: 8px !important;
+    color: #e6edf3 !important;
+}
+
+.stSpinner > div {
+    color: #388bfd !important;
+}
+
+.streamlit-expanderHeader {
+    background-color: #161b22 !important;
+    border-radius: 8px !important;
+    color: #e6edf3 !important;
+}
+
+.stLinkButton > a {
+    background: linear-gradient(135deg, #1f6feb 0%, #388bfd 100%) !important;
+    border: none !important;
+    border-radius: 8px !important;
+    color: white !important;
+}
+
+[data-testid="stMetricLabel"] {
+    color: #8b949e !important;
+}
+
+[data-testid="stMetricValue"],
+.stMarkdown,
+.stMarkdown p,
+.stMarkdown li {
+    color: #e6edf3 !important;
+}
+
+.stSelectbox [data-baseweb="select"],
+.stMultiSelect [data-baseweb="select"] {
+    background-color: #0d1117 !important;
+    border-color: #30363d !important;
+    border-radius: 8px !important;
+}
+
+.stSelectbox [data-baseweb="select"] > div,
+.stMultiSelect [data-baseweb="select"] > div {
+    background-color: #0d1117 !important;
+    color: #e6edf3 !important;
+}
+
+[data-baseweb="popover"] {
+    background-color: #161b22 !important;
+    border: 1px solid #30363d !important;
+}
+
+[data-baseweb="popover"] li {
+    color: #e6edf3 !important;
+}
+
+[data-baseweb="popover"] li:hover {
+    background-color: #21262d !important;
+}
+
+[data-baseweb="tag"] {
+    background-color: rgba(56, 139, 253, 0.15) !important;
+    border: 1px solid rgba(56, 139, 253, 0.3) !important;
+    color: #58a6ff !important;
+}
