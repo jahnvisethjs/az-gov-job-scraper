@@ -12,6 +12,7 @@ from config import (
     SUPPORTED_RESUME_FORMATS,
 )
 from job_identity import ensure_job_id
+from progress_events import SearchProgress
 from scrapers import ScraperRegistry
 from services import generate_tailoring_advice, process_resume, run_job_search
 from utils import (
@@ -181,30 +182,64 @@ def execute_search(api_key: str, job_title: str, location: str) -> None:
     if not profile["interests"]:
         update_user_profile(interests=[AREAS_OF_INTEREST[0]])
 
-    progress_bar = st.progress(0)
-    status_container = st.empty()
-    status_container.info("⏳ Searching for matching jobs...")
+    status_container = st.status("Preparing job search...", expanded=True)
+    progress_bar = st.progress(0.0, text="Preparing job search...")
     force_refresh = st.session_state.get("force_refresh", False)
     st.session_state.force_refresh = False
 
-    try:
-        with st.spinner("⏳ Analyzing job listings and computing match scores. This may take a minute..."):
-            matched_jobs = run_job_search(
-                api_key,
-                get_user_profile(),
-                ScraperRegistry.get_supported_cities(),
-                force_refresh=force_refresh,
-                job_title=job_title,
-                location=location,
-                progress_callback=lambda message: LOGGER.info("JobMatcher: %s", message),
+    def update_progress(event: SearchProgress) -> None:
+        """Render worker progress events from Streamlit's main thread."""
+        LOGGER.info("Job search [%s]: %s", event.phase, event.message)
+        progress_text = event.message
+        if event.jobs_found is not None:
+            progress_text = f"{progress_text} · {event.jobs_found} jobs found"
+        progress_bar.progress(event.progress, text=progress_text)
+
+        if event.phase == "complete":
+            status_container.update(
+                label=event.message,
+                state="complete",
+                expanded=False,
             )
+            return
+
+        status_container.update(label=event.message, state="running")
+        if event.city_state in {"cached", "complete", "error"}:
+            icon = {
+                "cached": "⚡",
+                "complete": "✅",
+                "error": "⚠️",
+            }[event.city_state]
+            status_container.write(f"{icon} {event.message}")
+
+    try:
+        matched_jobs = run_job_search(
+            api_key,
+            get_user_profile(),
+            ScraperRegistry.get_supported_cities(),
+            force_refresh=force_refresh,
+            job_title=job_title,
+            location=location,
+            progress_callback=update_progress,
+        )
         store_matched_jobs(matched_jobs)
-        progress_bar.progress(1.0)
-        status_container.success(f"✅ Found {len(matched_jobs)} jobs!")
+        progress_bar.progress(
+            1.0,
+            text=f"Complete · {len(matched_jobs)} matching jobs found",
+        )
+        status_container.update(
+            label=f"Found {len(matched_jobs)} matching jobs",
+            state="complete",
+            expanded=False,
+        )
         st.rerun()
     except Exception:
         LOGGER.exception("Job search failed")
-        status_container.error("❌ Job search failed. Check the server logs for details.")
+        status_container.update(
+            label="Job search failed. Check the server logs for details.",
+            state="error",
+            expanded=True,
+        )
 
 
 def render_results(api_key: str, min_score: int, max_jobs: int) -> None:

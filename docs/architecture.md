@@ -114,19 +114,24 @@ All jobs merged into single list
 
 ### Step 3 — Embedding & Vector Storage
 ```
-For each job:
+For each job in the searched city scope:
     prepare_job_text(job) → "Title: ...\n\nDepartment: ...\n\nDescription: ..."
     ↓
-ASU AI generate_embeddings_batch()
+SHA-256(text + embedding model configuration)
+    ↓
+Compare with the hash stored in ChromaDB metadata
+    ↓
+Unchanged → refresh metadata only; reuse existing embedding
+Changed/new → ASU AI generate_embeddings_batch()
     model: text-embedding-3-small (te3s)
     dimensions: 1024
     parallel workers: EMBEDDING_BATCH_WORKERS (default: 2)
     ↓
-[Content hash check — skip rebuild if same jobs already indexed]
-    ↓
-ChromaDB collection.add(documents, embeddings, ids, metadatas)
+ChromaDB collection.upsert(documents, embeddings, ids, metadatas)
     collection: "jobs"
     distance metric: cosine
+    ↓
+Delete expired jobs only within the refreshed city scope
 ```
 
 ### Step 4 — Semantic Search & Hybrid Scoring
@@ -136,7 +141,7 @@ prepare_resume_text(profile)
     ↓
 ASU AI generate_embedding_sync() → 1024-dim resume vector
     ↓
-ChromaDB.collection.query(query_embeddings=[resume_vec], n_results=100)
+ChromaDB.collection.query(query_embeddings=[resume_vec], n_results=index_size)
     → returns (job_metadata, cosine_distance) pairs
     ↓
 For each result:
@@ -144,8 +149,8 @@ For each result:
     keyword_score = matched_profile_keywords / total_profile_keywords
     final_score = (0.7 × semantic_similarity + 0.3 × keyword_score) × 100
     ↓
-Filter by MIN_MATCH_SCORE_THRESHOLD (default: 0 — show all)
-Sort descending → return ranked list
+Apply the user's eligible job IDs and MIN_MATCH_SCORE_THRESHOLD
+Sort descending → return the top 100 ranked jobs
 ```
 
 ### Step 5 — Tailoring Advice
@@ -175,7 +180,7 @@ Stored in st.session_state for instant re-display
 - `ui/components.py`: escaped job-card HTML and advice presentation
 - `ui/styles.py` + `assets/styles.css`: stylesheet loading and visual rules
 - `services/resume_service.py`: text extraction and one-time AI parsing
-- `services/job_search_service.py`: synchronous boundary around the async matcher
+- `services/job_search_service.py`: synchronous boundary around the async matcher and thread-safe progress-event relay
 - `services/browser_runtime.py`: deferred Linux Chromium provisioning
 - `services/tailoring_service.py`: UI-independent advice generation
 
@@ -237,8 +242,11 @@ Both sync and async variants are implemented. Batch embedding uses `ThreadPoolEx
 
 **`JobRAG` class responsibilities:**
 - Initializes ChromaDB persistent client at `./chroma_db` (cosine metric)
-- `add_jobs(jobs)`: embeds all jobs in parallel via ASU AI, inserts into ChromaDB
-  - Content-hash check skips redundant rebuilds
+- `add_jobs(jobs, scope_cities)`: synchronizes a city-scoped corpus with ChromaDB
+  - Reuses unchanged embeddings across new `JobRAG` instances
+  - Embeds only new or content-changed jobs
+  - Preserves indexed jobs belonging to cities outside the current scope
+  - Removes expired jobs within the refreshed scope
 - `search_jobs(profile, top_k)`: embeds resume, queries ChromaDB, applies hybrid scoring
 - `clear_jobs()`: drops and recreates ChromaDB collection
 
@@ -305,6 +313,11 @@ service owns worker-thread and event-loop setup; `JobMatcher` coordinates
 scraping, caching, embedding, hybrid scoring, and ranking through `JobRAG`.
 Tailoring advice is generated separately and only on demand.
 
+The worker emits typed `SearchProgress` events into a thread-safe queue. The
+service drains that queue on Streamlit's main thread, allowing `st.status` and
+`st.progress` to show cache hits, per-city completion or failure, embedding
+progress, and final matching without making Streamlit calls from a worker.
+
 ---
 
 ## 5. Resume Parsing Pipeline
@@ -362,7 +375,7 @@ Collection: "jobs"
 ├── Document:  "Title: ...\n\nDepartment: ...\n\nDescription: ...\n\nRequirements: ..."
 ├── Embedding: [float × 1024]
 ├── Metadata:  full job dict (nested dicts serialized to JSON strings)
-└── ID:        job_id or "{city}_{index}"
+└── ID:        stable job_id
 ```
 
 ### Hybrid Scoring Algorithm
@@ -375,8 +388,13 @@ final_score = (0.7 * semantic_similarity + 0.3 * keyword_score) * 100
 **Keyword source for scoring**: candidate skills + interests (from session profile)
 **Keyword target**: merged `title + description + requirements` of the job (lowercase)
 
-### Smart Rebuild Skip
-Before re-embedding, `add_jobs()` computes an MD5 hash of all job IDs. If the hash matches the last-indexed batch AND ChromaDB count matches, the rebuild is skipped entirely.
+### Incremental Index Synchronization
+Each job stores a SHA-256 fingerprint derived from its embedding text and the
+active embedding-model configuration. `add_jobs()` compares incoming jobs with
+the metadata already persisted in ChromaDB. Unchanged vectors are reused,
+changed/new jobs are upserted, and expired records are deleted only for cities
+included in the current refresh. This works across application reruns and new
+`JobRAG` instances; it does not depend on an in-memory batch hash.
 
 ---
 

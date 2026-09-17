@@ -7,7 +7,9 @@ An AI-assisted Streamlit application that collects Arizona municipal job posting
 - Scrapes 15 Arizona city and county portals through NeoGov and PeopleSoft adapters.
 - Extracts structured resume data from PDF, DOCX, and TXT uploads.
 - Builds 1,024-dimensional job and resume embeddings through ASU AIML.
+- Reuses unchanged job embeddings and incrementally indexes only job changes.
 - Ranks jobs with a hybrid score: 70% semantic similarity and 30% keyword overlap.
+- Shows live cache, city-scraping, indexing, and matching progress during searches.
 - Generates resume-tailoring advice with `claude-opus-4-7`.
 - Caches public job listings for six hours and keeps uploaded resume data in the Streamlit session.
 
@@ -58,6 +60,7 @@ The runtime is a direct Python flow: `streamlit_app.py` composes modules from `u
 az-gov-job-scraper/
 |-- streamlit_app.py          # Streamlit user interface
 |-- config.py                 # Environment-backed application settings
+|-- progress_events.py        # Typed search-progress messages
 |-- assets/                   # Application stylesheet
 |-- ui/                       # Streamlit sections and rendering components
 |-- services/                 # Resume, search, browser, and advice workflows

@@ -20,7 +20,7 @@ API Response Format:
 """
 import aiohttp
 import asyncio
-from typing import List, Dict, Optional
+from typing import Callable, List, Dict, Optional
 from config import ASU_AI_API_KEY, ASU_AI_BASE_URL, ASU_AI_MODEL
 
 
@@ -209,7 +209,8 @@ class ASUAIProvider:
         model: str = "te3s",
         provider: str = "openai",
         dimensions: Optional[int] = 1024,
-        max_workers: int = 5
+        max_workers: int = 5,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> List[List[float]]:
         """
         Generate embeddings for multiple texts in parallel using ThreadPoolExecutor.
@@ -220,6 +221,7 @@ class ASUAIProvider:
             provider: Embeddings provider
             dimensions: Embedding dimensions
             max_workers: Number of parallel workers
+            progress_callback: Optional callback receiving completed and total
             
         Returns:
             List of embedding vectors (same order as input texts)
@@ -234,6 +236,7 @@ class ASUAIProvider:
         
         embeddings = [None] * len(texts)
         
+        completed = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_idx = {
                 executor.submit(_embed_single, text): i 
@@ -247,6 +250,9 @@ class ASUAIProvider:
                     print(f"[ASU AI] Warning: embedding failed for text {idx}: {e}")
                     # Use None as fallback - callers should handle this
                     embeddings[idx] = None
+                completed += 1
+                if progress_callback:
+                    progress_callback(completed, len(texts))
         
         # Replace any None embeddings with zero vectors (same dimension as first valid one)
         valid = next((e for e in embeddings if e is not None), None)

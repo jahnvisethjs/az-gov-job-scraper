@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from rag.job_matcher import JobMatcher, filter_jobs_by_search, narrow_cities_by_location
-from rag.rag_engine import prepare_job_text, prepare_resume_text
+from rag.rag_engine import IndexUpdate, prepare_job_text, prepare_resume_text
 
 
 JOBS = [
@@ -73,7 +73,7 @@ class SearchFilterTests(unittest.TestCase):
     @patch("rag.job_matcher.get_cached_jobs")
     @patch("rag.job_matcher.is_cache_fresh", return_value=True)
     @patch("rag.job_matcher.JobRAG")
-    def test_matcher_applies_filters_before_indexing(
+    def test_matcher_indexes_city_corpus_then_filters_results(
         self,
         rag_class,
         _is_cache_fresh,
@@ -81,7 +81,17 @@ class SearchFilterTests(unittest.TestCase):
     ):
         rag = rag_class.return_value
         get_cached_jobs.return_value = JOBS
-        rag.search_jobs.return_value = [(JOBS[0].copy(), 87.5)]
+        rag.add_jobs.return_value = IndexUpdate(
+            total=3,
+            embedded=0,
+            unchanged=3,
+            removed=0,
+        )
+        rag.get_job_count.return_value = 3
+        rag.search_jobs.return_value = [
+            (JOBS[1].copy(), 95.0),
+            (JOBS[0].copy(), 87.5),
+        ]
 
         matcher = JobMatcher(api_key="test-key")
         results = asyncio.run(matcher.match_jobs_to_profile(
@@ -93,13 +103,49 @@ class SearchFilterTests(unittest.TestCase):
 
         get_cached_jobs.assert_called_once_with("Phoenix")
         indexed_jobs = rag.add_jobs.call_args.args[0]
-        self.assertEqual(len(indexed_jobs), 1)
-        self.assertEqual(indexed_jobs[0]["title"], JOBS[0]["title"])
+        self.assertEqual(len(indexed_jobs), 3)
+        self.assertEqual(
+            rag.add_jobs.call_args.kwargs["scope_cities"],
+            ["Phoenix"],
+        )
         self.assertRegex(indexed_jobs[0]["job_id"], r"^job_[0-9a-f]{24}$")
         search_profile = rag.search_jobs.call_args.args[0]
         self.assertEqual(search_profile["target_job_title"], "software engineer")
         self.assertEqual(search_profile["target_location"], "Phoenix, Arizona")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["title"], JOBS[0]["title"])
         self.assertEqual(results[0]["match_score"], 87.5)
+
+    @patch("rag.job_matcher.ScraperRegistry.get_scraper")
+    @patch("rag.job_matcher.is_cache_fresh", return_value=False)
+    @patch("rag.job_matcher.JobRAG")
+    def test_failed_city_is_not_treated_as_authoritative_index_scope(
+        self,
+        rag_class,
+        _is_cache_fresh,
+        get_scraper,
+    ):
+        class FailingScraper:
+            async def scrape_with_retry(self, max_retries):
+                raise RuntimeError("portal unavailable")
+
+        rag = rag_class.return_value
+        rag.add_jobs.return_value = IndexUpdate(
+            total=0,
+            embedded=0,
+            unchanged=0,
+            removed=0,
+        )
+        get_scraper.return_value = FailingScraper()
+
+        matcher = JobMatcher(api_key="test-key")
+        results = asyncio.run(matcher.match_jobs_to_profile(
+            profile={"resume_parsed": {}},
+            cities=["Tempe"],
+        ))
+
+        self.assertEqual(results, [])
+        self.assertEqual(rag.add_jobs.call_args.kwargs["scope_cities"], [])
 
 
 if __name__ == "__main__":

@@ -1,17 +1,20 @@
 """
 RAG Engine for semantic job matching using:
 - ASU AI text-embedding-3-small for vector embeddings (1024 dimensions)
-- ASU AI GPT-4o for text generation (resume parsing, tailoring advice)
+- ASU AI Claude Opus 4.7 for text generation (resume parsing, tailoring advice)
 - ChromaDB for vector storage and similarity search
 """
 import chromadb
 from chromadb.config import Settings
-from typing import List, Dict, Optional, Tuple
-import asyncio
+from dataclasses import dataclass
+from typing import Callable, List, Dict, Optional, Tuple
 import hashlib
 from config import (
     ASU_AI_API_KEY,
     ASU_AI_BASE_URL,
+    ASU_AI_EMBEDDINGS_DIMENSIONS,
+    ASU_AI_EMBEDDINGS_MODEL,
+    ASU_AI_EMBEDDINGS_PROVIDER,
     VECTOR_DB_PATH,
     MIN_MATCH_SCORE_THRESHOLD,
     EMBEDDING_BATCH_WORKERS
@@ -156,10 +159,44 @@ def calculate_keyword_overlap(job: Dict, profile: Dict) -> float:
     return matches / total_keywords
 
 
-def _compute_jobs_hash(jobs: List[Dict]) -> str:
-    """Compute a content hash for a list of jobs to detect changes."""
-    job_ids = sorted(job["job_id"] for job in deduplicate_jobs(jobs))
-    return hashlib.md5("|".join(job_ids).encode()).hexdigest()
+EMBEDDING_HASH_KEY = "_embedding_content_hash"
+
+
+@dataclass(frozen=True)
+class IndexUpdate:
+    """Summary of an incremental job-index synchronization."""
+
+    total: int
+    embedded: int
+    unchanged: int
+    removed: int
+
+
+def _job_embedding_hash(job: Dict) -> str:
+    """Hash the text and model settings that determine a job embedding."""
+    source = "\n".join([
+        ASU_AI_EMBEDDINGS_PROVIDER,
+        ASU_AI_EMBEDDINGS_MODEL,
+        str(ASU_AI_EMBEDDINGS_DIMENSIONS),
+        prepare_job_text(job),
+    ])
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def _serialize_job_metadata(job: Dict, content_hash: str) -> Dict:
+    """Flatten a job for ChromaDB metadata storage."""
+    import json
+
+    metadata = {}
+    for key, value in job.items():
+        if isinstance(value, dict):
+            metadata[key] = json.dumps(value)
+        elif isinstance(value, (str, int, float, bool)) or value is None:
+            metadata[key] = value
+        else:
+            metadata[key] = str(value)
+    metadata[EMBEDDING_HASH_KEY] = content_hash
+    return metadata
 
 
 class JobRAG:
@@ -196,9 +233,7 @@ class JobRAG:
             metadata={"hnsw:space": "cosine"}  # Use cosine similarity
         )
         
-        # Track current content hash to skip redundant rebuilds
-        self._current_hash = None
-    
+
     def generate_embedding(self, text: str) -> List[float]:
         """
         Generate embedding using ASU AI text-embedding-3-small.
@@ -222,79 +257,105 @@ class JobRAG:
         """Alias for generate_embedding (already synchronous)."""
         return self.generate_embedding(text)
     
-    def add_jobs(self, jobs: List[Dict]) -> int:
-        """
-        Add jobs to vector database using batch parallel embeddings.
-        Skips rebuild if the same set of jobs is already indexed.
-        
-        Args:
-            jobs: List of job dictionaries
-            
-        Returns:
-            Number of jobs added
-        """
-        if not jobs:
-            return 0
+    def add_jobs(
+        self,
+        jobs: List[Dict],
+        *,
+        scope_cities: Optional[List[str]] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+    ) -> IndexUpdate:
+        """Incrementally synchronize jobs with the vector database.
 
+        Existing embeddings survive new ``JobRAG`` instances. Only new jobs,
+        jobs whose embedded text changed, or jobs affected by embedding-model
+        configuration changes are sent to the embeddings API.
+
+        Args:
+            jobs: Complete job set for the supplied city scope.
+            scope_cities: Cities represented by ``jobs``. Jobs from other
+                previously indexed cities are preserved.
+            progress_callback: Optional callback receiving completed and total.
+
+        Returns:
+            Incremental update statistics.
+        """
         jobs = deduplicate_jobs(jobs)
-        
-        # Check if we already have these exact jobs indexed
-        new_hash = _compute_jobs_hash(jobs)
-        if self._current_hash == new_hash and self.collection.count() == len(jobs):
-            print(f"[RAG] Skipping rebuild — same {len(jobs)} jobs already indexed.")
-            return len(jobs)
-        
-        # Clear and rebuild
-        self.clear_jobs()
-        
-        # Prepare all texts for batch embedding
-        documents = []
-        ids = []
-        metadatas = []
-        
+        existing = self.collection.get(include=["metadatas"])
+        existing_metadatas = existing.get("metadatas") or []
+        existing_by_id = {
+            job_id: metadata or {}
+            for job_id, metadata in zip(existing.get("ids") or [], existing_metadatas)
+        }
+
+        incoming = {}
         for job in jobs:
-            job_text = prepare_job_text(job)
-            documents.append(job_text)
-            
-            ids.append(job["job_id"])
-            
-            # Flatten metadata - ChromaDB doesn't support nested dicts
-            metadata = {}
-            for key, value in job.items():
-                if isinstance(value, dict):
-                    import json
-                    metadata[key] = json.dumps(value)
-                elif isinstance(value, (str, int, float, bool)) or value is None:
-                    metadata[key] = value
-                else:
-                    metadata[key] = str(value)
-            
-            metadatas.append(metadata)
-        
-        # Generate embeddings in parallel batches
-        from config import ASU_AI_EMBEDDINGS_MODEL, ASU_AI_EMBEDDINGS_PROVIDER, ASU_AI_EMBEDDINGS_DIMENSIONS
-        
-        print(f"[RAG] Generating embeddings for {len(documents)} jobs with {EMBEDDING_BATCH_WORKERS} workers...")
-        embeddings = self.llm_provider.generate_embeddings_batch(
-            texts=documents,
-            model=ASU_AI_EMBEDDINGS_MODEL,
-            provider=ASU_AI_EMBEDDINGS_PROVIDER,
-            dimensions=ASU_AI_EMBEDDINGS_DIMENSIONS,
-            max_workers=EMBEDDING_BATCH_WORKERS
+            content_hash = _job_embedding_hash(job)
+            incoming[job["job_id"]] = {
+                "job": job,
+                "hash": content_hash,
+                "metadata": _serialize_job_metadata(job, content_hash),
+            }
+
+        incoming_ids = set(incoming)
+        if scope_cities is None:
+            managed_existing_ids = set(existing_by_id)
+        else:
+            managed_cities = set(scope_cities)
+            managed_existing_ids = {
+                job_id
+                for job_id, metadata in existing_by_id.items()
+                if metadata.get("city") in managed_cities
+            }
+
+        stale_ids = sorted(managed_existing_ids - incoming_ids)
+        if stale_ids:
+            self.collection.delete(ids=stale_ids)
+
+        changed_ids = [
+            job_id
+            for job_id, item in incoming.items()
+            if existing_by_id.get(job_id, {}).get(EMBEDDING_HASH_KEY) != item["hash"]
+        ]
+        changed_id_set = set(changed_ids)
+        unchanged_ids = [job_id for job_id in incoming if job_id not in changed_id_set]
+
+        # Metadata such as application URLs can change without affecting the
+        # text embedding, so refresh it without calling the embeddings API.
+        if unchanged_ids:
+            self.collection.update(
+                ids=unchanged_ids,
+                metadatas=[incoming[job_id]["metadata"] for job_id in unchanged_ids],
+            )
+
+        if changed_ids:
+            documents = [prepare_job_text(incoming[job_id]["job"]) for job_id in changed_ids]
+            print(
+                f"[RAG] Embedding {len(documents)} new or changed jobs "
+                f"with {EMBEDDING_BATCH_WORKERS} workers..."
+            )
+            embeddings = self.llm_provider.generate_embeddings_batch(
+                texts=documents,
+                model=ASU_AI_EMBEDDINGS_MODEL,
+                provider=ASU_AI_EMBEDDINGS_PROVIDER,
+                dimensions=ASU_AI_EMBEDDINGS_DIMENSIONS,
+                max_workers=EMBEDDING_BATCH_WORKERS,
+                progress_callback=progress_callback,
+            )
+            self.collection.upsert(
+                documents=documents,
+                embeddings=embeddings,
+                ids=changed_ids,
+                metadatas=[incoming[job_id]["metadata"] for job_id in changed_ids],
+            )
+        else:
+            print(f"[RAG] Reusing {len(unchanged_ids)} existing job embeddings.")
+
+        return IndexUpdate(
+            total=len(jobs),
+            embedded=len(changed_ids),
+            unchanged=len(unchanged_ids),
+            removed=len(stale_ids),
         )
-        print(f"[RAG] Embeddings generated successfully.")
-        
-        # Add to ChromaDB in one call
-        self.collection.add(
-            documents=documents,
-            embeddings=embeddings,
-            ids=ids,
-            metadatas=metadatas
-        )
-        
-        self._current_hash = new_hash
-        
-        return len(jobs)
     
     def search_jobs(
         self,
@@ -330,7 +391,9 @@ class JobRAG:
             metadatas = results["metadatas"][0]  # First query result
             distances = results["distances"][0] if results.get("distances") else []
             
-            for i, job_metadata in enumerate(metadatas):
+            for i, stored_metadata in enumerate(metadatas):
+                job_metadata = dict(stored_metadata)
+                job_metadata.pop(EMBEDDING_HASH_KEY, None)
                 # Convert cosine distance to similarity (1 - distance)
                 semantic_similarity = 1.0 - distances[i] if distances else 0.5
                 
@@ -365,7 +428,6 @@ class JobRAG:
                 name="jobs",
                 metadata={"hnsw:space": "cosine"}
             )
-            self._current_hash = None
         except Exception:
             pass  # Collection might not exist
     

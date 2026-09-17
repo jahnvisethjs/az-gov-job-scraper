@@ -2,14 +2,16 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from queue import Empty, Queue
 from typing import Callable, Dict, List, Optional
 
+from progress_events import SearchProgress
 from rag import JobMatcher
 
 from .browser_runtime import ensure_playwright_browser
 
 
-ProgressCallback = Optional[Callable[[str], None]]
+ProgressCallback = Optional[Callable[[SearchProgress], None]]
 
 
 def run_job_search(
@@ -28,7 +30,18 @@ def run_job_search(
     avoids nested-event-loop failures while keeping Streamlit's render thread
     free of asyncio lifecycle management.
     """
+    if progress_callback:
+        progress_callback(SearchProgress(
+            phase="browser",
+            message="Preparing the browser runtime...",
+            progress=0.01,
+        ))
     ensure_playwright_browser()
+
+    progress_events: Queue[SearchProgress] = Queue()
+
+    def publish_progress(event: SearchProgress) -> None:
+        progress_events.put(event)
 
     def run_in_worker() -> List[Dict]:
         loop = asyncio.new_event_loop()
@@ -39,7 +52,7 @@ def run_job_search(
                 matcher.match_jobs_to_profile(
                     profile=profile,
                     cities=cities,
-                    progress_callback=progress_callback,
+                    progress_callback=publish_progress if progress_callback else None,
                     force_refresh=force_refresh,
                     job_title=job_title,
                     location=location,
@@ -50,4 +63,19 @@ def run_job_search(
             asyncio.set_event_loop(None)
 
     with ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(run_in_worker).result()
+        future = pool.submit(run_in_worker)
+
+        if progress_callback:
+            while not future.done():
+                try:
+                    progress_callback(progress_events.get(timeout=0.1))
+                except Empty:
+                    continue
+
+            while True:
+                try:
+                    progress_callback(progress_events.get_nowait())
+                except Empty:
+                    break
+
+        return future.result()

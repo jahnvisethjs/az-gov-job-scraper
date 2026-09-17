@@ -1,5 +1,7 @@
 import asyncio
+import threading
 
+from progress_events import SearchProgress
 from services import browser_runtime, job_search_service, resume_service
 from ui.components import render_job_card_html
 
@@ -54,6 +56,8 @@ def test_resume_service_preserves_text_when_ai_parse_fails(monkeypatch):
 
 def test_job_search_service_owns_worker_event_loop(monkeypatch):
     calls = {}
+    callback_threads = []
+    caller_thread = threading.get_ident()
     monkeypatch.setattr(job_search_service, "ensure_playwright_browser", lambda: None)
 
     class FakeMatcher:
@@ -63,6 +67,11 @@ def test_job_search_service_owns_worker_event_loop(monkeypatch):
         async def match_jobs_to_profile(self, **kwargs):
             calls["loop_running"] = asyncio.get_running_loop().is_running()
             calls["kwargs"] = kwargs
+            kwargs["progress_callback"](SearchProgress(
+                phase="scraping",
+                message="Completed Tempe",
+                progress=0.5,
+            ))
             return [{"job_id": "test-job"}]
 
     monkeypatch.setattr(job_search_service, "JobMatcher", FakeMatcher)
@@ -72,12 +81,19 @@ def test_job_search_service_owns_worker_event_loop(monkeypatch):
         ["Tempe"],
         job_title="Developer",
         location="Tempe",
+        progress_callback=lambda event: callback_threads.append(
+            (threading.get_ident(), event.phase)
+        ),
     )
 
     assert result == [{"job_id": "test-job"}]
     assert calls["api_key"] == "test-key"
     assert calls["loop_running"] is True
     assert calls["kwargs"]["job_title"] == "Developer"
+    assert callback_threads == [
+        (caller_thread, "browser"),
+        (caller_thread, "scraping"),
+    ]
 
 
 def test_browser_install_is_skipped_outside_linux(monkeypatch):
