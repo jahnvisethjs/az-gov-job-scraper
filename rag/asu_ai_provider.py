@@ -93,7 +93,7 @@ class ASUAIProvider:
         """
         Synchronous wrapper for generate_content.
         
-        Uses nest_asyncio to handle Streamlit's existing event loop.
+        Uses a dedicated worker thread so Streamlit's event loop is not reused.
         
         Args:
             prompt: Input prompt for the model

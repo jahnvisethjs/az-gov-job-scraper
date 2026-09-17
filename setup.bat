@@ -39,7 +39,7 @@ echo ====================================
 echo.
 echo Next steps:
 echo 1. Copy .env.example to .env
-echo 2. Add your GEMINI_API_KEY to .env
+echo 2. Add your ASU_AI_API_KEY to .env
 echo 3. Run: streamlit run streamlit_app.py
 echo.
 pause
