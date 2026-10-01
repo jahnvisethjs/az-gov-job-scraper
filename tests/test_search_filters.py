@@ -101,7 +101,7 @@ class SearchFilterTests(unittest.TestCase):
             location="Phoenix, Arizona",
         ))
 
-        get_cached_jobs.assert_called_once_with("Phoenix")
+        get_cached_jobs.assert_called_once_with("Phoenix", allow_stale=False)
         indexed_jobs = rag.add_jobs.call_args.args[0]
         self.assertEqual(len(indexed_jobs), 3)
         self.assertEqual(
@@ -126,7 +126,7 @@ class SearchFilterTests(unittest.TestCase):
         get_scraper,
     ):
         class FailingScraper:
-            async def scrape_with_retry(self, max_retries):
+            async def scrape_with_retry(self, max_retries, cancel_check=None):
                 raise RuntimeError("portal unavailable")
 
         rag = rag_class.return_value
@@ -146,6 +146,65 @@ class SearchFilterTests(unittest.TestCase):
 
         self.assertEqual(results, [])
         self.assertEqual(rag.add_jobs.call_args.kwargs["scope_cities"], [])
+
+    @patch("rag.job_matcher.get_cached_jobs", return_value=JOBS)
+    @patch("rag.job_matcher.ScraperRegistry.get_scraper")
+    @patch("rag.job_matcher.JobRAG")
+    def test_cached_only_uses_stale_snapshot_without_scraping(
+        self,
+        rag_class,
+        get_scraper,
+        get_cached_jobs,
+    ):
+        rag = rag_class.return_value
+        rag.add_jobs.return_value = IndexUpdate(
+            total=3,
+            embedded=0,
+            unchanged=3,
+            removed=0,
+        )
+        rag.get_job_count.return_value = 3
+        rag.search_jobs.return_value = [(JOBS[0].copy(), 80.0)]
+
+        matcher = JobMatcher(api_key="test-key")
+        results = asyncio.run(matcher.match_jobs_to_profile(
+            profile={"resume_parsed": {}},
+            cities=["Phoenix"],
+            cached_only=True,
+        ))
+
+        get_cached_jobs.assert_called_once_with("Phoenix", allow_stale=True)
+        get_scraper.assert_not_called()
+        self.assertEqual(results[0]["match_score"], 80.0)
+
+    @patch("rag.job_matcher.get_cached_jobs")
+    @patch("rag.job_matcher.is_cache_fresh", return_value=True)
+    @patch("rag.job_matcher.JobRAG")
+    def test_catalog_only_indexes_without_resume_search(
+        self,
+        rag_class,
+        _is_cache_fresh,
+        get_cached_jobs,
+    ):
+        rag = rag_class.return_value
+        get_cached_jobs.return_value = JOBS
+        rag.add_jobs.return_value = IndexUpdate(
+            total=3,
+            embedded=0,
+            unchanged=3,
+            removed=0,
+        )
+
+        matcher = JobMatcher(api_key="test-key")
+        results = asyncio.run(matcher.match_jobs_to_profile(
+            profile={},
+            cities=["Phoenix"],
+            catalog_only=True,
+        ))
+
+        self.assertEqual(results, [])
+        rag.add_jobs.assert_called_once()
+        rag.search_jobs.assert_not_called()
 
 
 if __name__ == "__main__":

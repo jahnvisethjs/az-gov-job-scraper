@@ -1,132 +1,225 @@
-"""
-PeopleSoft/Oracle HCM scraper.
-Used by City of Phoenix and potentially other large municipalities.
-"""
-from typing import List, Dict, Optional
-from playwright.async_api import async_playwright, Page
-from .base_scraper import BaseJobScraper, JobData, JobPortalError
+"""Direct HTTP scraper for Phoenix's public PeopleSoft Candidate Gateway."""
+
 import asyncio
+import re
+from typing import Any, Dict, List
+from urllib.parse import urlencode, urlsplit, urlunsplit
+
+import requests
+from bs4 import BeautifulSoup
+
+from progress_events import SearchCancelled
+from .base_scraper import BaseJobScraper, JobData, JobPortalError
 
 
 class PeopleSoftScraper(BaseJobScraper):
-    """
-    Scraper for PeopleSoft/Oracle HCM job portals.
-    
-    PeopleSoft is an enterprise HR system with a custom web interface.
-    Phoenix URL: https://hcmprod.phoenix.gov/psc/hcmprodtam/EMPLOYEE/COP_TAM/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL
-    """
-    
+    """Collect PeopleSoft listings without launching a browser."""
+
+    DEFAULT_DETAIL_CONCURRENCY = 5
+    PHOENIX_SITE_ID = "10"
     def get_platform_name(self) -> str:
         return "PeopleSoft"
-    
+
     async def scrape_jobs(self) -> List[JobData]:
-        """Scrape jobs from PeopleSoft portal using Playwright."""
-        jobs = []
-        
-        async with async_playwright() as p:
-            # Launch browser
-            browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        """Fetch the server-rendered result list and enrich its postings."""
+        self.raise_if_cancelled()
+        self._request_timeout = float(
+            self.config.get("request_timeout_seconds", 30)
+        )
+        try:
+            listing_html = await self._fetch_text(self.base_url)
+            jobs = self.parse_listing_page(
+                listing_html,
+                city_name=self.city_name,
+                portal_url=self.base_url,
+                site_id=str(self.config.get("site_id", self.PHOENIX_SITE_ID)),
             )
-            page = await context.new_page()
-            
-            try:
-                print(f"🔍 Scraping {self.city_name} from {self.base_url}")
-                
-                await page.goto(self.base_url, wait_until="networkidle", timeout=30000)
-                
-                # Wait for page to load
-                await asyncio.sleep(2)
-                
-                # Click "View All Jobs" if button exists
-                try:
-                    view_all_button = await page.wait_for_selector("a:has-text('View All Jobs'), button:has-text('View All Jobs')", timeout=5000)
-                    if view_all_button:
-                        await view_all_button.click()
-                        await page.wait_for_load_state("networkidle")
-                except:
-                    print("'View All Jobs' button not found, proceeding...")
-                
-                # Wait for job listings table or grid
-                await page.wait_for_selector("table.PSLEVEL1GRIDWBO, table#HRS_CE_RSLT_nav, .PSLEVEL1GRIDROW", timeout=15000)
-                
-                # Extract jobs from table rows
-                # PeopleSoft typically uses table structure
-                rows = await page.query_selector_all("tr.PSLEVEL1GRIDROW, tr.ps_grid-row")
-                
-                print(f"Found {len(rows)} job rows")
-                
-                for row in rows:
-                    try:
-                        # Extract data from row cells
-                        cells = await row.query_selector_all("td, span")
-                        
-                        # Title (usually in a link)
-                        title_link = await row.query_selector("a")
-                        title = await title_link.text_content() if title_link else ""
-                        job_url = await title_link.get_attribute("href") if title_link else ""
-                        
-                        # Make URL absolute if needed
-                        if job_url and not job_url.startswith("http"):
-                            base = self.base_url.split("/psc/")[0]
-                            job_url = base + job_url
-                        
-                        # Extract other fields from cells (order may vary)
-                        # Typically: Job ID, Title, Department, Location, Posted Date, Closing Date
-                        cell_texts = []
-                        for cell in cells[:8]:  # Limit to first 8 cells
-                            text = await cell.text_content()
-                            cell_texts.append(text.strip() if text else "")
-                        
-                        # Heuristic field extraction (may need adjustment)
-                        job_id = cell_texts[0] if len(cell_texts) > 0 else ""
-                        department = cell_texts[2] if len(cell_texts) > 2 else ""
-                        location = cell_texts[3] if len(cell_texts) > 3 else self.city_name
-                        posted_date = cell_texts[4] if len(cell_texts) > 4 else ""
-                        closing_date = cell_texts[5] if len(cell_texts) > 5 else ""
-                        
-                        if title and title.strip():
-                            job = JobData(
-                                title=title.strip(),
-                                city=self.city_name,
-                                url=job_url,
-                                job_id=job_id,
-                                department=department,
-                                location=location if location else self.city_name,
-                                posted_date=self.normalize_date(posted_date),
-                                closing_date=self.normalize_date(closing_date),
-                                raw_data={"platform": "PeopleSoft"}
-                            )
-                            
-                            jobs.append(job)
-                    
-                    except Exception as e:
-                        print(f"⚠️  Error extracting job: {e}")
-                        continue
-                
-            except Exception as e:
-                raise JobPortalError(f"Failed to scrape {self.city_name}: {e}")
-            
-            finally:
-                await browser.close()
-        
+            if not jobs and not self._reports_zero_jobs(listing_html):
+                raise JobPortalError(
+                    "PeopleSoft returned no recognizable listings; its markup may have changed"
+                )
+            if jobs:
+                await self._enrich_jobs(jobs)
+        except SearchCancelled:
+            raise
+        except JobPortalError:
+            raise
+        except Exception as exc:
+            raise JobPortalError(f"Failed to scrape {self.city_name}: {exc}") from exc
+
         self.jobs = jobs
         return jobs
-    
-    async def get_job_details(self, job_url: str, page: Page) -> Dict:
-        """Get full job description from individual job page."""
-        try:
-            await page.goto(job_url, wait_until="networkidle", timeout=30000)
-            
-            # Description is usually in a specific div or span
-            desc_elem = await page.query_selector("#win0divHRS_CE_WRK_POSTING_DESCR, .PSLONGEDITBOX, #POSTING_DESCR")
-            description = await desc_elem.text_content() if desc_elem else ""
-            
-            return {
-                "description": description.strip(),
-                "requirements": ""  # Often mixed with description in PeopleSoft
-            }
-        except Exception as e:
-            print(f"⚠️  Could not get job details: {e}")
-            return {"description": "", "requirements": ""}
+
+    async def _fetch_text(
+        self,
+        url: str,
+    ) -> str:
+        self.raise_if_cancelled()
+        response = await asyncio.to_thread(
+            requests.get,
+            url,
+            timeout=self._request_timeout,
+        )
+        response.raise_for_status()
+        self.raise_if_cancelled()
+        return response.text
+
+    async def _enrich_jobs(
+        self,
+        jobs: List[JobData],
+    ) -> None:
+        concurrency = max(
+            1,
+            int(self.config.get("detail_concurrency", self.DEFAULT_DETAIL_CONCURRENCY)),
+        )
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def enrich(job: JobData) -> None:
+            async with semaphore:
+                self.raise_if_cancelled()
+                try:
+                    details = await self.get_job_details(job.url)
+                except SearchCancelled:
+                    raise
+                except Exception as exc:
+                    print(f"Could not load PeopleSoft details for {job.url}: {exc}")
+                    return
+
+                for field in ("description", "requirements", "salary"):
+                    value = details.get(field)
+                    if value:
+                        setattr(job, field, value)
+
+        await asyncio.gather(*(enrich(job) for job in jobs))
+
+    async def get_job_details(
+        self,
+        job_url: str,
+    ) -> Dict[str, str]:
+        """Fetch and parse one public Candidate Gateway posting."""
+        detail_html = await self._fetch_text(job_url)
+        return self.parse_job_details(detail_html)
+
+    @classmethod
+    def parse_listing_page(
+        cls,
+        page_html: str,
+        *,
+        city_name: str,
+        portal_url: str,
+        site_id: str = PHOENIX_SITE_ID,
+    ) -> List[JobData]:
+        """Parse PeopleSoft's server-rendered grid into normalized jobs."""
+        soup = BeautifulSoup(page_html, "lxml")
+        jobs: List[JobData] = []
+        seen_ids = set()
+
+        for row in soup.select("li.ps_grid-row"):
+            title = cls._field_text(row, "SCH_JOB_TITLE")
+            source_job_id = cls._field_text(
+                row,
+                "HRS_APP_JBSCH_I_HRS_JOB_OPENING_ID",
+            )
+            if not title or not source_job_id or source_job_id in seen_ids:
+                continue
+            seen_ids.add(source_job_id)
+
+            category = cls._field_text(row, "LOCATION")
+            department = cls._field_text(row, "HRS_APP_JBSCH_I_HRS_DEPT_DESCR")
+            posted_date = cls._field_text(row, "SCH_OPENED")
+            closing_date = cls._field_text(row, "HRS_CLS_DT_DESCR")
+            job_url = cls.build_detail_url(portal_url, source_job_id, site_id)
+
+            jobs.append(JobData(
+                title=title,
+                city=city_name,
+                url=job_url,
+                location=city_name,
+                department=department,
+                posted_date=posted_date,
+                closing_date=closing_date,
+                job_id=source_job_id,
+                raw_data={
+                    "platform": "PeopleSoft",
+                    "posting_id": source_job_id,
+                    "category": category,
+                    "site_id": site_id,
+                },
+            ))
+
+        return jobs
+
+    @classmethod
+    def parse_job_details(cls, page_html: str) -> Dict[str, str]:
+        """Extract labelled description, qualification, and salary sections."""
+        soup = BeautifulSoup(page_html, "lxml")
+        description_sections = []
+        requirement_sections = []
+        salary = ""
+
+        for group in soup.select(".hrs_cg_groupbox_field_label_back"):
+            heading_element = group.select_one(
+                "[id^='HRS_SCH_WRK_DESCR100'][id$='lbl']"
+            )
+            content_element = group.select_one(
+                "span[id^='HRS_SCH_PSTDSC_DESCRLONG']"
+            )
+            heading = cls._clean_text(
+                heading_element.get_text(" ", strip=True) if heading_element else ""
+            )
+            content = cls._clean_text(
+                content_element.get_text(" ", strip=True) if content_element else ""
+            )
+            if not heading or not content:
+                continue
+
+            section = f"{heading}\n{content}"
+            if re.search(r"qualification|requirement|education|experience", heading, re.I):
+                requirement_sections.append(section)
+            else:
+                description_sections.append(section)
+            if heading.casefold() == "salary":
+                salary = content
+
+        return {
+            "description": "\n\n".join(description_sections),
+            "requirements": "\n\n".join(requirement_sections),
+            "salary": salary,
+        }
+
+    @staticmethod
+    def build_detail_url(portal_url: str, source_job_id: str, site_id: str) -> str:
+        """Build the public, stable Candidate Gateway URL for one posting."""
+        parsed = urlsplit(portal_url)
+        path = parsed.path.replace("/COP_TAM/", "/HRMS/")
+        query = urlencode({
+            "Page": "HRS_APP_JBPST_FL",
+            "Action": "U",
+            "FOCUS": "Applicant",
+            "SiteId": site_id,
+            "JobOpeningId": source_job_id,
+            "PostingSeq": "1",
+        })
+        return urlunsplit((parsed.scheme, parsed.netloc, path, query, ""))
+
+    @classmethod
+    def _field_text(cls, row: Any, field_name: str) -> str:
+        element = row.find(id=re.compile(rf"^{re.escape(field_name)}\$\d+$"))
+        return cls._clean_text(element.get_text(" ", strip=True) if element else "")
+
+    @staticmethod
+    def _clean_text(value: Any) -> str:
+        return re.sub(r"\s+", " ", str(value or "")).strip()
+
+    @staticmethod
+    def _reports_zero_jobs(page_html: str) -> bool:
+        soup = BeautifulSoup(page_html, "lxml")
+        row_count = soup.select_one(".psc_rowcount")
+        return bool(
+            row_count
+            and re.search(
+                r"\b0\s+rows?\b",
+                row_count.get_text(" ", strip=True),
+                re.I,
+            )
+        )

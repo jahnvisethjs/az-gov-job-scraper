@@ -11,6 +11,7 @@ import aiohttp
 from bs4 import BeautifulSoup
 
 from job_identity import canonicalize_job_url as canonicalize_url
+from progress_events import SearchCancelled
 from .base_scraper import BaseJobScraper, JobData, JobPortalError
 
 
@@ -54,6 +55,7 @@ class NeoGovScraper(BaseJobScraper):
 
     async def scrape_jobs(self) -> List[JobData]:
         """Scrape every listing page and enrich each unique job from its detail page."""
+        self.raise_if_cancelled()
         if not self.agency_code:
             raise JobPortalError(
                 f"Could not determine the NEOGOV agency code from {self.base_url}"
@@ -88,6 +90,7 @@ class NeoGovScraper(BaseJobScraper):
         print(f"Scraping {self.city_name} from {self.base_url}")
 
         while page_number and page_number <= max_pages and page_number not in seen_pages:
+            self.raise_if_cancelled()
             seen_pages.add(page_number)
             listing_html = await self._fetch_text(
                 session,
@@ -146,7 +149,9 @@ class NeoGovScraper(BaseJobScraper):
             headers=request_headers,
         ) as response:
             response.raise_for_status()
-            return await response.text()
+            text = await response.text()
+            self.raise_if_cancelled()
+            return text
 
     async def _enrich_jobs(
         self,
@@ -166,8 +171,11 @@ class NeoGovScraper(BaseJobScraper):
 
         async def enrich(job: JobData) -> None:
             async with semaphore:
+                self.raise_if_cancelled()
                 try:
                     details = await self.get_job_details(job.url, session)
+                except SearchCancelled:
+                    raise
                 except Exception as exc:
                     print(f"Could not load details for {job.url}: {exc}")
                     return

@@ -3,15 +3,19 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from queue import Empty, Queue
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
-from progress_events import SearchProgress
-from rag import JobMatcher
-
-from .browser_runtime import ensure_playwright_browser
+from progress_events import (
+    CancelCheck,
+    SearchPartialResult,
+    SearchProgress,
+    raise_if_cancelled,
+)
+from rag.job_matcher import JobMatcher
 
 
 ProgressCallback = Optional[Callable[[SearchProgress], None]]
+PartialResultsCallback = Optional[Callable[[SearchPartialResult], None]]
 
 
 def run_job_search(
@@ -20,9 +24,13 @@ def run_job_search(
     cities: List[str],
     *,
     force_refresh: bool = False,
+    cached_only: bool = False,
+    catalog_only: bool = False,
     job_title: str = "",
     location: str = "",
     progress_callback: ProgressCallback = None,
+    partial_results_callback: PartialResultsCallback = None,
+    cancel_check: CancelCheck = None,
 ) -> List[Dict]:
     """Run the async matcher without coupling it to Streamlit.
 
@@ -30,18 +38,21 @@ def run_job_search(
     avoids nested-event-loop failures while keeping Streamlit's render thread
     free of asyncio lifecycle management.
     """
-    if progress_callback:
-        progress_callback(SearchProgress(
-            phase="browser",
-            message="Preparing the browser runtime...",
-            progress=0.01,
-        ))
-    ensure_playwright_browser()
-
-    progress_events: Queue[SearchProgress] = Queue()
+    raise_if_cancelled(cancel_check)
+    updates: Queue[Tuple[str, object]] = Queue()
 
     def publish_progress(event: SearchProgress) -> None:
-        progress_events.put(event)
+        updates.put(("progress", event))
+
+    def publish_partial(result: SearchPartialResult) -> None:
+        updates.put(("partial", result))
+
+    def dispatch_update(update: Tuple[str, object]) -> None:
+        kind, payload = update
+        if kind == "progress" and progress_callback:
+            progress_callback(payload)
+        elif kind == "partial" and partial_results_callback:
+            partial_results_callback(payload)
 
     def run_in_worker() -> List[Dict]:
         loop = asyncio.new_event_loop()
@@ -53,7 +64,13 @@ def run_job_search(
                     profile=profile,
                     cities=cities,
                     progress_callback=publish_progress if progress_callback else None,
+                    partial_results_callback=(
+                        publish_partial if partial_results_callback else None
+                    ),
+                    cancel_check=cancel_check,
                     force_refresh=force_refresh,
+                    cached_only=cached_only,
+                    catalog_only=catalog_only,
                     job_title=job_title,
                     location=location,
                 )
@@ -65,16 +82,16 @@ def run_job_search(
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(run_in_worker)
 
-        if progress_callback:
+        if progress_callback or partial_results_callback:
             while not future.done():
                 try:
-                    progress_callback(progress_events.get(timeout=0.1))
+                    dispatch_update(updates.get(timeout=0.1))
                 except Empty:
                     continue
 
             while True:
                 try:
-                    progress_callback(progress_events.get_nowait())
+                    dispatch_update(updates.get_nowait())
                 except Empty:
                     break
 

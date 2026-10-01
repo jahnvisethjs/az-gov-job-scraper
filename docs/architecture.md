@@ -2,7 +2,7 @@
 
 **Maintained system pipeline and architecture documentation**
 
-Last updated: 2026-09-17
+Last updated: 2026-10-01
 
 ---
 
@@ -30,16 +30,18 @@ AI-powered job search application that matches user resumes with Arizona governm
 - **Semantic Job Matching**: ChromaDB vector search using ASU AI `text-embedding-3-small` (1024-dim)
 - **Hybrid Scoring**: 70% semantic similarity + 30% keyword overlap, scaled 0–100
 - **Tailoring Advice**: Per-job resume improvement advice via ASU AI
-- **Multi-City Scraping**: Parallel Playwright scraping across NeoGov and PeopleSoft platforms
-- **Disk Cache**: JSON-based job cache with configurable TTL (default 6 hours)
+- **Multi-City Scraping**: Parallel direct HTTP scraping across NeoGov and PeopleSoft platforms
+- **Cached-first Search**: Saved matches render before the live portal refresh finishes
+- **Live Partial Results**: Completed-city listings appear during refresh and can be retained after cancellation
+- **Durable Catalog**: Optional PostgreSQL snapshots and embedding reuse, with local JSON/Chroma fallback
 
 ### User Journey
 ```
 Upload resume → AI parses skills/experience →
-Scrape government job portals (or load from cache) →
-Embed jobs + resume via ASU AI →
-Semantic + keyword hybrid scoring →
-Ranked results with per-job tailoring advice
+Rank saved jobs and display them →
+Refresh portals in the background →
+Incrementally update embeddings →
+Replace the results with the fresh ranking
 ```
 
 ---
@@ -53,14 +55,16 @@ streamlit_app.py (page composition)
 ui/ (inputs, sections, rendering) ------> assets/styles.css
         |
         v
-services/ (resume, search, browser, advice workflows)
+services/ (resume, foreground/background search, advice workflows)
         |
         +--> rag/resume_parser.py ------> ASU AI Claude Opus 4.7
         |
         +--> rag/job_matcher.py
                  |
-                 +--> utils/job_cache.py
-                 +--> scrapers/ -------> Playwright job portals
+                 +--> utils/job_cache.py -----> storage/job_store.py
+                 |                                  |--> PostgreSQL (deployed)
+                 |                                  `--> JSON (local fallback)
+                 +--> scrapers/ -------> public HTTP job portals
                  +--> rag/rag_engine.py -> ASU embeddings -> ChromaDB
         |
         +--> rag/TailoringAdvisor ------> ASU AI Claude Opus 4.7
@@ -101,15 +105,23 @@ Stored only in st.session_state["user_profile"]["resume_parsed"]
 ```
 User clicks Search
     ↓
+Cached-only pass reads available snapshots without contacting job portals
+    ↓
+Saved jobs are ranked and displayed
+    ↓
+A bounded background worker starts the live pass
+    ↓
 For each city in ScraperRegistry:
-    is_cache_fresh(city)?  →  YES → load from data/cache/jobs_{city}.json
-                           →  NO  → scrape with Playwright (max 3 concurrent)
+    is_cache_fresh(city)?  →  YES → load from configured shared/local store
+                           →  NO  → scrape with direct HTTP (max 3 cities concurrent)
                                      ↓
                                    scraper.scrape_with_retry(max_retries=2)
                                      ↓
                                    save_cached_jobs(city, jobs)
+                                     ↓
+                                   publish the completed city's unranked listings
     ↓
-All jobs merged into single list
+All jobs merged and the displayed ranking is replaced
 ```
 
 ### Step 3 — Embedding & Vector Storage
@@ -133,6 +145,8 @@ ChromaDB collection.upsert(documents, embeddings, ids, metadatas)
     ↓
 Delete expired jobs only within the refreshed city scope
 ```
+
+When `DATABASE_URL` is set, generated vectors are also stored with their content hashes in PostgreSQL. A new application instance can restore matching vectors into its local Chroma index instead of calling the embeddings API again.
 
 ### Step 4 — Semantic Search & Hybrid Scoring
 ```
@@ -181,7 +195,7 @@ Stored in st.session_state for instant re-display
 - `ui/styles.py` + `assets/styles.css`: stylesheet loading and visual rules
 - `services/resume_service.py`: text extraction and one-time AI parsing
 - `services/job_search_service.py`: synchronous boundary around the async matcher and thread-safe progress-event relay
-- `services/browser_runtime.py`: deferred Linux Chromium provisioning
+- `services/background_search.py`: bounded process-local worker pool and immutable progress snapshots
 - `services/tailoring_service.py`: UI-independent advice generation
 
 **Key session state keys:**
@@ -196,6 +210,7 @@ st.session_state = {
         "resume_parsed": Dict    # Set after ASU AI parsing
     },
     "matched_jobs": List[Dict],  # Full ranked results
+    "search_task_id": str,       # Active background refresh, if any
     "advice_{job_id}": Dict,     # Cached tailoring advice per job
     "show_advice_{job_id}": bool # Toggle state per card
 }
@@ -273,7 +288,7 @@ final_score         = (0.7 × semantic_similarity + 0.3 × keyword_score) × 100
 
 **`NeoGovScraper`**: Targets `governmentjobs.com` portals used by ~13 cities.
 
-**`PeopleSoftScraper`**: Targets Phoenix's PeopleSoft portal (`hcmprod.phoenix.gov`).
+**`PeopleSoftScraper`**: Targets Phoenix's PeopleSoft portal (`hcmprod.phoenix.gov`) through its server-rendered list and Candidate Gateway detail URLs. It does not launch Chromium.
 
 **`ScraperRegistry`**:
 - `CITY_MAPPINGS` dict: city name → (platform, URL)
@@ -287,9 +302,9 @@ Phoenix, Scottsdale, Pima County, Tempe, Mesa, Glendale, Chandler, Gilbert, Apac
 
 ---
 
-### 4.5 `utils/job_cache.py` — Disk-Based Job Cache
+### 4.5 `storage/job_store.py` and `utils/job_cache.py`
 
-Persists scraped jobs to `/data/cache/jobs_{city}.json` to avoid redundant Playwright sessions.
+`utils/job_cache.py` is a facade over the configured store. Local development persists scraped jobs to `/data/cache/jobs_{city}.json`. When `DATABASE_URL` is set, PostgreSQL holds city snapshots and content-hash-keyed vectors so application and scheduled-worker instances share one catalog.
 
 | Function | Description |
 |---|---|
@@ -298,6 +313,8 @@ Persists scraped jobs to `/data/cache/jobs_{city}.json` to avoid redundant Playw
 | `save_cached_jobs(city, jobs)` | Writes jobs + timestamp to disk |
 | `get_cache_age(city)` | Returns cache age in hours |
 | `clear_cache(city=None)` | Deletes one city or all cache files |
+
+The scheduled `.github/workflows/refresh-job-catalog.yml` workflow runs `scripts/refresh_job_catalog.py` every four hours. It refreshes every portal and precomputes job embeddings before users search. The workflow requires the `ASU_AI_API_KEY` and `DATABASE_URL` repository secrets.
 
 Parsed resumes are deliberately excluded from the disk cache and remain in the user's Streamlit session only.
 
@@ -313,10 +330,17 @@ service owns worker-thread and event-loop setup; `JobMatcher` coordinates
 scraping, caching, embedding, hybrid scoring, and ranking through `JobRAG`.
 Tailoring advice is generated separately and only on demand.
 
-The worker emits typed `SearchProgress` events into a thread-safe queue. The
-service drains that queue on Streamlit's main thread, allowing `st.status` and
-`st.progress` to show cache hits, per-city completion or failure, embedding
-progress, and final matching without making Streamlit calls from a worker.
+The foreground cached-only pass returns before the portal refresh starts. The
+background manager records typed `SearchProgress` events under an opaque task
+ID, and a Streamlit fragment polls immutable snapshots once per second. This
+keeps saved results interactive while `st.status` and `st.progress` show live
+cache, per-city, embedding, and matching progress.
+
+Each completed city also emits a `SearchPartialResult`. The UI displays those
+fresh listings as explicitly unranked while later cities and embeddings are
+still running. A Cancel button sets a cooperative token checked between portal
+requests, parsing loops, embedding batches, and ranking. Completed-city results
+remain available if the refresh is cancelled or a later city fails.
 
 ---
 
@@ -391,10 +415,11 @@ final_score = (0.7 * semantic_similarity + 0.3 * keyword_score) * 100
 ### Incremental Index Synchronization
 Each job stores a SHA-256 fingerprint derived from its embedding text and the
 active embedding-model configuration. `add_jobs()` compares incoming jobs with
-the metadata already persisted in ChromaDB. Unchanged vectors are reused,
-changed/new jobs are upserted, and expired records are deleted only for cities
-included in the current refresh. This works across application reruns and new
-`JobRAG` instances; it does not depend on an in-memory batch hash.
+the metadata already persisted in ChromaDB. Unchanged local vectors are reused;
+when PostgreSQL is configured, vectors with matching fingerprints can also be
+restored into a new local Chroma index. Remaining changed/new jobs are embedded
+and upserted, and expired records are deleted only for cities included in the
+current refresh.
 
 ---
 
@@ -417,7 +442,12 @@ async def scrape_city(city):
 results = await asyncio.gather(*[scrape_city(c) for c in stale_cities])
 ```
 
-### Cache File Format
+### Local Cache File Format
+
+The JSON format below is the fallback when `DATABASE_URL` is unset. Deployed
+instances can instead use the PostgreSQL tables created automatically by
+`PostgresJobStore`.
+
 `data/cache/jobs_{city_name}.json`:
 ```json
 {
@@ -434,14 +464,16 @@ results = await asyncio.gather(*[scrape_city(c) for c in stale_cities])
 
 ```
 Streamlit entry point → UI sections → application services
-                                      ├──→ JobMatcher → cache/scrapers → JobRAG
+                                      ├──→ background manager → JobMatcher
+                                      │                           └─→ store/scrapers → JobRAG
                                       └──→ TailoringAdvisor (on demand)
 ```
 
-`services.run_job_search()` is the synchronous UI boundary. It creates a worker
-event loop and calls `JobMatcher.match_jobs_to_profile()`, which handles the
-scraping/cache decision and delegates vector operations to `JobRAG`. Tailoring
-advice is generated only when the user requests it for a result.
+`services.run_job_search()` is the synchronous matcher boundary. A cached-only
+call first supplies saved results. `BackgroundSearchManager` then runs the live
+call outside Streamlit reruns, while a fragment polls its progress. `JobMatcher`
+handles the scraping/cache decision and delegates vector operations to
+`JobRAG`. Tailoring advice remains on demand.
 
 ---
 
@@ -456,10 +488,10 @@ advice is generated only when the user requests it for a result.
 | **Embeddings** | ASU AIML API → `text-embedding-3-small` (1024 dims) |
 | **Vector DB** | ChromaDB (local persistent, cosine similarity) |
 | **Orchestration** | Direct Python flow through `JobMatcher` and `JobRAG` |
-| **Web Scraping** | Playwright (headless Chromium) + BeautifulSoup4 |
+| **Web Scraping** | aiohttp + BeautifulSoup4/lxml |
 | **Resume Extraction** | PyPDF2, pdfplumber, python-docx |
-| **Job Cache** | JSON files on disk (TTL-based) |
-| **Async Runtime** | asyncio plus bounded worker pools for UI execution and embeddings |
+| **Job Store** | PostgreSQL when configured; atomic JSON files locally |
+| **Async Runtime** | asyncio plus bounded pools for refresh, UI execution, and embeddings |
 
 ### Key Configuration Variables (`config.py` / `.env`)
 
@@ -473,7 +505,7 @@ advice is generated only when the user requests it for a result.
 | `EMBEDDING_BATCH_WORKERS` | `2` | Parallel embedding threads |
 | `JOB_CACHE_HOURS` | `6` | Cache TTL in hours |
 | `CACHE_DIR` | `./data/cache` | Cache directory path |
-| `PLAYWRIGHT_SKIP_BROWSER_INSTALL` | `false` | Skip deferred Linux Chromium provisioning |
+| `DATABASE_URL` | empty | Optional shared PostgreSQL connection URL |
 | `VECTOR_DB_PATH` | `./chroma_db` | ChromaDB persistence path |
 | `MIN_MATCH_SCORE_THRESHOLD` | `0` | Filter threshold (0 = show all) |
 | `TOP_JOBS_TO_DISPLAY` | `50` | Max results from RAG search |

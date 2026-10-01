@@ -1,13 +1,19 @@
 """
 Job Matcher and Tailoring Advisor for personalized job recommendations.
 """
-from typing import List, Dict
+from typing import Callable, List, Dict, Optional
 from .rag_engine import JobRAG
 from scrapers import ScraperRegistry
 import asyncio
 import os
 import re
-from progress_events import SearchProgress
+from progress_events import (
+    CancelCheck,
+    SearchCancelled,
+    SearchPartialResult,
+    SearchProgress,
+    raise_if_cancelled,
+)
 from config import ASU_AI_API_KEY
 from utils.job_cache import (
     is_cache_fresh,
@@ -95,7 +101,11 @@ class JobMatcher:
         profile: Dict,
         cities: List[str],
         progress_callback=None,
+        partial_results_callback: Optional[Callable[[SearchPartialResult], None]] = None,
+        cancel_check: CancelCheck = None,
         force_refresh: bool = False,
+        cached_only: bool = False,
+        catalog_only: bool = False,
         job_title: str = "",
         location: str = ""
     ) -> List[Dict]:
@@ -107,7 +117,11 @@ class JobMatcher:
             profile: User profile dictionary
             cities: List of city names to scrape
             progress_callback: Optional callback function for progress updates
+            partial_results_callback: Callback for newly refreshed city listings
+            cancel_check: Optional cooperative-cancellation check
             force_refresh: If True, ignore cache and re-scrape all cities
+            cached_only: If True, use available snapshots without scraping
+            catalog_only: If True, refresh/index without resume ranking
             job_title: Optional job-title terms supplied by the user
             location: Optional location supplied by the user
             
@@ -134,6 +148,7 @@ class JobMatcher:
                 ))
 
         all_jobs = []
+        raise_if_cancelled(cancel_check)
         cities = narrow_cities_by_location(cities, location)
         total_cities = max(len(cities), 1)
         completed_cities = 0
@@ -146,7 +161,10 @@ class JobMatcher:
         stale_cities = []
         
         for city in cities:
-            if not force_refresh and is_cache_fresh(city):
+            raise_if_cancelled(cancel_check)
+            if cached_only:
+                cached_cities.append(city)
+            elif not force_refresh and is_cache_fresh(city):
                 cached_cities.append(city)
             else:
                 stale_cities.append(city)
@@ -154,7 +172,8 @@ class JobMatcher:
         # Load cached jobs
         if cached_cities:
             for city in cached_cities:
-                jobs = get_cached_jobs(city)
+                raise_if_cancelled(cancel_check)
+                jobs = get_cached_jobs(city, allow_stale=cached_only)
                 if jobs is not None:
                     synchronized_cities.add(city)
                 if jobs:
@@ -179,12 +198,13 @@ class JobMatcher:
                 jobs_found=jobs_found,
             )
             
-            semaphore = asyncio.Semaphore(3)  # Limit concurrent browsers
+            semaphore = asyncio.Semaphore(3)  # Limit concurrent portal traffic
             
             async def scrape_city(city):
                 nonlocal completed_cities, jobs_found
                 async with semaphore:
                     try:
+                        raise_if_cancelled(cancel_check)
                         emit(
                             "scraping",
                             f"Searching {city}...",
@@ -195,7 +215,11 @@ class JobMatcher:
                         )
                         
                         scraper = ScraperRegistry.get_scraper(city)
-                        jobs = await scraper.scrape_with_retry(max_retries=2)
+                        jobs = await scraper.scrape_with_retry(
+                            max_retries=2,
+                            cancel_check=cancel_check,
+                        )
+                        raise_if_cancelled(cancel_check)
                         
                         jobs_dict = [job.to_dict() for job in jobs]
                         
@@ -205,6 +229,13 @@ class JobMatcher:
                         
                         completed_cities += 1
                         jobs_found += len(jobs)
+                        if partial_results_callback and jobs_dict:
+                            partial_results_callback(SearchPartialResult(
+                                city=city,
+                                jobs=tuple(deduplicate_jobs(jobs_dict)),
+                                completed_cities=completed_cities,
+                                total_cities=total_cities,
+                            ))
                         emit(
                             "scraping",
                             f"Completed {city} ({len(jobs)} jobs)",
@@ -215,6 +246,8 @@ class JobMatcher:
                         )
                         
                         return jobs_dict
+                    except SearchCancelled:
+                        raise
                     except Exception as e:
                         completed_cities += 1
                         emit(
@@ -229,11 +262,22 @@ class JobMatcher:
                         return []
             
             # Run all stale city scrapes in parallel
-            results = await asyncio.gather(*[scrape_city(city) for city in stale_cities])
+            scrape_tasks = [
+                asyncio.create_task(scrape_city(city))
+                for city in stale_cities
+            ]
+            try:
+                results = await asyncio.gather(*scrape_tasks)
+            except SearchCancelled:
+                for task in scrape_tasks:
+                    task.cancel()
+                await asyncio.gather(*scrape_tasks, return_exceptions=True)
+                raise
             
             for city_jobs in results:
                 all_jobs.extend(city_jobs)
 
+        raise_if_cancelled(cancel_check)
         all_jobs = deduplicate_jobs(all_jobs)
         unfiltered_count = len(all_jobs)
         filtered_jobs = filter_jobs_by_search(
@@ -266,15 +310,26 @@ class JobMatcher:
             all_jobs,
             scope_cities=sorted(synchronized_cities),
             progress_callback=embedding_progress,
+            cancel_check=cancel_check,
         )
-        if index_update.embedded:
+        reused_count = index_update.unchanged + index_update.restored
+        if index_update.embedded or index_update.restored:
             index_message = (
                 f"Search index updated: {index_update.embedded} embedded, "
-                f"{index_update.unchanged} reused"
+                f"{reused_count} reused"
             )
         else:
             index_message = f"Reused {index_update.unchanged} existing job embeddings"
         emit("indexing", index_message, 0.90)
+
+        if catalog_only:
+            emit(
+                "complete",
+                f"Catalog synchronized with {len(all_jobs)} current jobs",
+                1.0,
+                jobs_found=len(all_jobs),
+            )
+            return []
 
         if not all_jobs:
             emit("complete", "No current jobs were found", 1.0, jobs_found=0)
@@ -286,6 +341,7 @@ class JobMatcher:
 
         # Step 4: Semantic search and matching
         emit("matching", "Comparing your resume with current jobs...", 0.93)
+        raise_if_cancelled(cancel_check)
 
         search_profile = dict(profile)
         search_profile["target_job_title"] = job_title.strip()
@@ -294,6 +350,7 @@ class JobMatcher:
             search_profile,
             top_k=max(self.rag_engine.get_job_count(), 1),
         )
+        raise_if_cancelled(cancel_check)
         matched_jobs = [
             (job, score)
             for job, score in matched_jobs

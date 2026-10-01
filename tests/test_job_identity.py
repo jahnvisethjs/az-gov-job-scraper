@@ -14,6 +14,7 @@ from job_identity import (
     stable_job_id,
 )
 from utils import job_cache, session_manager
+from storage import LocalJsonJobStore
 
 
 def job(url, city="Tempe", title="Analyst", score=80):
@@ -111,7 +112,11 @@ class CacheIdentityTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch.object(job_cache, "CACHE_DIR", directory):
+            with patch.object(
+                job_cache,
+                "get_job_store",
+                return_value=LocalJsonJobStore(directory),
+            ):
                 cached_jobs = job_cache.get_cached_jobs("Tempe")
 
         self.assertEqual(len(cached_jobs), 1)
@@ -120,7 +125,11 @@ class CacheIdentityTests(unittest.TestCase):
     def test_cache_save_persists_ids_and_removes_duplicates(self):
         duplicate_url = "https://example.gov/jobs/100"
         with tempfile.TemporaryDirectory() as directory:
-            with patch.object(job_cache, "CACHE_DIR", directory):
+            with patch.object(
+                job_cache,
+                "get_job_store",
+                return_value=LocalJsonJobStore(directory),
+            ):
                 job_cache.save_cached_jobs(
                     "Tempe",
                     [job(duplicate_url), job(duplicate_url + "?utm_source=email")],

@@ -23,7 +23,7 @@ class ScraperRegistry:
     
     # Manual city-to-scraper mappings (for special cases)
     CITY_MAPPINGS = {
-        "Phoenix": ("PeopleSoft", "https://hcmprod.phoenix.gov/psc/hcmprodtam/EMPLOYEE/COP_TAM/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?FOCUS=Applicant"),
+        "Phoenix": ("PeopleSoft", "https://hcmprod.phoenix.gov/psc/hcmprodtam/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?Action=U&Page=HRS_APP_SCHJOB_FL"),
         "Scottsdale": ("NeoGov", "https://www.governmentjobs.com/careers/scottsdaleaz"),
         "Pima County": ("NeoGov", "https://www.governmentjobs.com/careers/pima"),
         "Tempe": ("NeoGov", "https://www.governmentjobs.com/careers/tempe"),
@@ -108,7 +108,7 @@ class ScraperRegistry:
     def get_supported_cities(cls) -> list[str]:
         """Get list of cities with configured scrapers."""
         return list(cls.CITY_MAPPINGS.keys())
-    
+
     @classmethod
     def add_city(cls, city_name: str, platform: str, url: str):
         """

@@ -8,8 +8,12 @@ An AI-assisted Streamlit application that collects Arizona municipal job posting
 - Extracts structured resume data from PDF, DOCX, and TXT uploads.
 - Builds 1,024-dimensional job and resume embeddings through ASU AIML.
 - Reuses unchanged job embeddings and incrementally indexes only job changes.
+- Shows saved matches immediately while fresh listings load in the background.
+- Optionally shares job snapshots and embedding vectors through PostgreSQL.
 - Ranks jobs with a hybrid score: 70% semantic similarity and 30% keyword overlap.
 - Shows live cache, city-scraping, indexing, and matching progress during searches.
+- Streams completed-city listings during refresh and allows cooperative cancellation.
+- Uses direct HTTP collection for both NeoGov and Phoenix PeopleSoft portals; no browser install is required.
 - Generates resume-tailoring advice with `claude-opus-4-7`.
 - Caches public job listings for six hours and keeps uploaded resume data in the Streamlit session.
 
@@ -21,7 +25,6 @@ Requirements: Python 3.10+ and an ASU AIML API key.
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-playwright install chromium
 Copy-Item .env.example .env
 ```
 
@@ -63,11 +66,12 @@ az-gov-job-scraper/
 |-- progress_events.py        # Typed search-progress messages
 |-- assets/                   # Application stylesheet
 |-- ui/                       # Streamlit sections and rendering components
-|-- services/                 # Resume, search, browser, and advice workflows
+|-- services/                 # Resume, background search, browser, and advice workflows
+|-- storage/                  # Local JSON and optional PostgreSQL job storage
 |-- rag/                      # ASU AI client, parsing, embeddings, and scoring
 |-- scrapers/                 # NeoGov and PeopleSoft scraping adapters
 |-- utils/                    # Session, cache, and document extraction helpers
-|-- scripts/diagnostics/      # Explicitly-run external service checks
+|-- scripts/                  # Scheduled catalog refresh and manual diagnostics
 |-- tests/                    # Network-free automated tests
 |-- docs/                     # Maintained project documentation
 `-- data/cache/               # Generated public job cache (ignored by Git)

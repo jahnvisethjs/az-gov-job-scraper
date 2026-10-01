@@ -1,155 +1,71 @@
-"""
-Job cache layer for persisting scraped jobs to disk.
-Avoids re-scraping cities when cached results are still fresh.
-"""
-import json
-import os
-from datetime import datetime, timedelta
-from typing import List, Dict, Optional
-from pathlib import Path
-from config import CACHE_DIR, JOB_CACHE_HOURS
-from job_identity import deduplicate_jobs
+"""Job-catalog cache facade backed by local JSON or shared PostgreSQL."""
+
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional
+
+from config import JOB_CACHE_HOURS
+from storage import get_job_store
 
 
-def _get_cache_dir() -> Path:
-    """Get and ensure cache directory exists."""
-    cache_dir = Path(CACHE_DIR)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir
-
-
-def _city_cache_path(city: str) -> Path:
-    """Get cache file path for a city."""
-    safe_name = city.lower().replace(" ", "_").replace("/", "_")
-    return _get_cache_dir() / f"jobs_{safe_name}.json"
+def _now_for(timestamp: datetime) -> datetime:
+    """Return a clock compatible with naive or timezone-aware timestamps."""
+    return datetime.now(timezone.utc) if timestamp.tzinfo else datetime.now()
 
 
 def is_cache_fresh(city: str, max_age_hours: int = None) -> bool:
-    """
-    Check if cached jobs for a city are still fresh.
-    
-    Args:
-        city: City name
-        max_age_hours: Override for cache TTL (defaults to config)
-        
-    Returns:
-        True if cache exists and is within TTL
-    """
-    max_age = max_age_hours or JOB_CACHE_HOURS
-    cache_file = _city_cache_path(city)
-    
-    if not cache_file.exists():
+    """Return whether a city snapshot exists within the configured TTL."""
+    snapshot = get_job_store().get_city_snapshot(city)
+    if not snapshot:
         return False
-    
-    try:
-        with open(cache_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        
-        cached_at = datetime.fromisoformat(data.get("cached_at", ""))
-        return datetime.now() - cached_at < timedelta(hours=max_age)
-    except (json.JSONDecodeError, ValueError, KeyError):
-        return False
+    max_age = JOB_CACHE_HOURS if max_age_hours is None else max_age_hours
+    return _now_for(snapshot.refreshed_at) - snapshot.refreshed_at < timedelta(hours=max_age)
 
 
-def get_cached_jobs(city: str) -> Optional[List[Dict]]:
-    """
-    Get cached jobs for a city (if cache is fresh).
-    
-    Args:
-        city: City name
-        
-    Returns:
-        List of job dicts, or None if cache is stale/missing
-    """
-    if not is_cache_fresh(city):
+def get_cached_jobs(city: str, allow_stale: bool = False) -> Optional[List[Dict]]:
+    """Return a city snapshot, optionally allowing stale data."""
+    snapshot = get_job_store().get_city_snapshot(city)
+    if not snapshot:
         return None
-    
-    cache_file = _city_cache_path(city)
-    try:
-        with open(cache_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return deduplicate_jobs(data.get("jobs", []))
-    except (json.JSONDecodeError, FileNotFoundError):
+    if not allow_stale and (
+        _now_for(snapshot.refreshed_at) - snapshot.refreshed_at
+        >= timedelta(hours=JOB_CACHE_HOURS)
+    ):
         return None
+    return snapshot.jobs
 
 
-def save_cached_jobs(city: str, jobs: List[Dict]):
-    """
-    Save scraped jobs to cache.
-    
-    Args:
-        city: City name
-        jobs: List of job dictionaries
-    """
-    cache_file = _city_cache_path(city)
-    normalized_jobs = deduplicate_jobs(jobs)
-    data = {
-        "city": city,
-        "cached_at": datetime.now().isoformat(),
-        "job_count": len(normalized_jobs),
-        "jobs": normalized_jobs
-    }
-    
-    with open(cache_file, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, default=str)
+def save_cached_jobs(city: str, jobs: List[Dict]) -> None:
+    """Atomically replace the current job snapshot for a city."""
+    get_job_store().replace_city_jobs(city, jobs)
 
 
 def get_cache_age(city: str) -> Optional[float]:
-    """
-    Get cache age in hours for a city.
-    
-    Returns:
-        Age in hours, or None if no cache exists
-    """
-    cache_file = _city_cache_path(city)
-    if not cache_file.exists():
+    """Return snapshot age in hours, or ``None`` if it is unavailable."""
+    snapshot = get_job_store().get_city_snapshot(city)
+    if not snapshot:
         return None
-    
-    try:
-        with open(cache_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        cached_at = datetime.fromisoformat(data.get("cached_at", ""))
-        delta = datetime.now() - cached_at
-        return delta.total_seconds() / 3600
-    except (json.JSONDecodeError, ValueError):
-        return None
+    delta = _now_for(snapshot.refreshed_at) - snapshot.refreshed_at
+    return delta.total_seconds() / 3600
 
 
-def clear_cache(city: Optional[str] = None):
-    """
-    Clear cache. If city is specified, clear only that city's cache.
-    If city is None, clear ALL cache files.
-    """
-    if city:
-        cache_file = _city_cache_path(city)
-        if cache_file.exists():
-            cache_file.unlink()
-    else:
-        cache_dir = _get_cache_dir()
-        for f in cache_dir.glob("jobs_*.json"):
-            f.unlink()
+def clear_cache(city: Optional[str] = None) -> None:
+    """Clear one city or the complete configured job store."""
+    get_job_store().clear(city)
 
 
 def get_cache_summary() -> Dict:
-    """Get a summary of all cached data."""
-    cache_dir = _get_cache_dir()
+    """Return job counts, age, and freshness for all available snapshots."""
     summary = {"cities": {}, "total_jobs": 0}
-    
-    for f in cache_dir.glob("jobs_*.json"):
-        try:
-            with open(f, "r", encoding="utf-8") as fh:
-                data = json.load(fh)
-            city = data.get("city", f.stem)
-            age_hours = get_cache_age(city)
-            fresh = is_cache_fresh(city)
-            summary["cities"][city] = {
-                "job_count": data.get("job_count", 0),
-                "age_hours": round(age_hours, 1) if age_hours else None,
-                "fresh": fresh
-            }
-            if fresh:
-                summary["total_jobs"] += data.get("job_count", 0)
-        except (json.JSONDecodeError, Exception):
-            continue
-    
+    for snapshot in get_job_store().list_snapshots():
+        age_hours = (
+            _now_for(snapshot.refreshed_at) - snapshot.refreshed_at
+        ).total_seconds() / 3600
+        fresh = age_hours < JOB_CACHE_HOURS
+        summary["cities"][snapshot.city] = {
+            "job_count": len(snapshot.jobs),
+            "age_hours": round(age_hours, 1),
+            "fresh": fresh,
+        }
+        if fresh:
+            summary["total_jobs"] += len(snapshot.jobs)
     return summary

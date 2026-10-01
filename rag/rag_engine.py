@@ -23,6 +23,8 @@ import os
 from pathlib import Path
 from rag.asu_ai_provider import ASUAIProvider
 from job_identity import deduplicate_jobs
+from progress_events import CancelCheck, raise_if_cancelled
+from storage import get_job_store
 
 
 def prepare_job_text(job: Dict) -> str:
@@ -170,6 +172,7 @@ class IndexUpdate:
     embedded: int
     unchanged: int
     removed: int
+    restored: int = 0
 
 
 def _job_embedding_hash(job: Dict) -> str:
@@ -217,6 +220,7 @@ class JobRAG:
         
         # Initialize ASU AI provider for both text generation AND embeddings
         self.llm_provider = ASUAIProvider(api_key=self.api_key)
+        self.job_store = get_job_store()
         
         # Initialize ChromaDB
         db_path = Path(VECTOR_DB_PATH)
@@ -263,6 +267,7 @@ class JobRAG:
         *,
         scope_cities: Optional[List[str]] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
+        cancel_check: CancelCheck = None,
     ) -> IndexUpdate:
         """Incrementally synchronize jobs with the vector database.
 
@@ -275,11 +280,13 @@ class JobRAG:
             scope_cities: Cities represented by ``jobs``. Jobs from other
                 previously indexed cities are preserved.
             progress_callback: Optional callback receiving completed and total.
+            cancel_check: Optional cooperative-cancellation check.
 
         Returns:
             Incremental update statistics.
         """
         jobs = deduplicate_jobs(jobs)
+        raise_if_cancelled(cancel_check)
         existing = self.collection.get(include=["metadatas"])
         existing_metadatas = existing.get("metadatas") or []
         existing_by_id = {
@@ -308,9 +315,6 @@ class JobRAG:
             }
 
         stale_ids = sorted(managed_existing_ids - incoming_ids)
-        if stale_ids:
-            self.collection.delete(ids=stale_ids)
-
         changed_ids = [
             job_id
             for job_id, item in incoming.items()
@@ -318,6 +322,38 @@ class JobRAG:
         ]
         changed_id_set = set(changed_ids)
         unchanged_ids = [job_id for job_id in incoming if job_id not in changed_id_set]
+
+        raise_if_cancelled(cancel_check)
+        requested_hashes = {
+            job_id: incoming[job_id]["hash"]
+            for job_id in changed_ids
+        }
+        shared_embeddings = self.job_store.load_embeddings(requested_hashes)
+        restored_ids = [job_id for job_id in changed_ids if job_id in shared_embeddings]
+        api_ids = [job_id for job_id in changed_ids if job_id not in shared_embeddings]
+
+        api_embeddings = []
+        if api_ids:
+            documents = [prepare_job_text(incoming[job_id]["job"]) for job_id in api_ids]
+            print(
+                f"[RAG] Embedding {len(documents)} new or changed jobs "
+                f"with {EMBEDDING_BATCH_WORKERS} workers..."
+            )
+            api_embeddings = self.llm_provider.generate_embeddings_batch(
+                texts=documents,
+                model=ASU_AI_EMBEDDINGS_MODEL,
+                provider=ASU_AI_EMBEDDINGS_PROVIDER,
+                dimensions=ASU_AI_EMBEDDINGS_DIMENSIONS,
+                max_workers=EMBEDDING_BATCH_WORKERS,
+                progress_callback=progress_callback,
+                cancel_check=cancel_check,
+            )
+
+        # Defer all Chroma mutations until expensive/cancellable work finishes,
+        # preventing cancellation from leaving a half-synchronized index.
+        raise_if_cancelled(cancel_check)
+        if stale_ids:
+            self.collection.delete(ids=stale_ids)
 
         # Metadata such as application URLs can change without affecting the
         # text embedding, so refresh it without calling the embeddings API.
@@ -327,34 +363,37 @@ class JobRAG:
                 metadatas=[incoming[job_id]["metadata"] for job_id in unchanged_ids],
             )
 
-        if changed_ids:
-            documents = [prepare_job_text(incoming[job_id]["job"]) for job_id in changed_ids]
-            print(
-                f"[RAG] Embedding {len(documents)} new or changed jobs "
-                f"with {EMBEDDING_BATCH_WORKERS} workers..."
+        if restored_ids:
+            self.collection.upsert(
+                documents=[prepare_job_text(incoming[job_id]["job"]) for job_id in restored_ids],
+                embeddings=[shared_embeddings[job_id] for job_id in restored_ids],
+                ids=restored_ids,
+                metadatas=[incoming[job_id]["metadata"] for job_id in restored_ids],
             )
-            embeddings = self.llm_provider.generate_embeddings_batch(
-                texts=documents,
-                model=ASU_AI_EMBEDDINGS_MODEL,
-                provider=ASU_AI_EMBEDDINGS_PROVIDER,
-                dimensions=ASU_AI_EMBEDDINGS_DIMENSIONS,
-                max_workers=EMBEDDING_BATCH_WORKERS,
-                progress_callback=progress_callback,
-            )
+
+        if api_ids:
             self.collection.upsert(
                 documents=documents,
-                embeddings=embeddings,
-                ids=changed_ids,
-                metadatas=[incoming[job_id]["metadata"] for job_id in changed_ids],
+                embeddings=api_embeddings,
+                ids=api_ids,
+                metadatas=[incoming[job_id]["metadata"] for job_id in api_ids],
             )
+            self.job_store.save_embeddings({
+                job_id: (incoming[job_id]["hash"], embedding)
+                for job_id, embedding in zip(api_ids, api_embeddings)
+            })
         else:
-            print(f"[RAG] Reusing {len(unchanged_ids)} existing job embeddings.")
+            print(
+                f"[RAG] Reusing {len(unchanged_ids)} local and "
+                f"{len(restored_ids)} shared job embeddings."
+            )
 
         return IndexUpdate(
             total=len(jobs),
-            embedded=len(changed_ids),
+            embedded=len(api_ids),
             unchanged=len(unchanged_ids),
             removed=len(stale_ids),
+            restored=len(restored_ids),
         )
     
     def search_jobs(

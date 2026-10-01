@@ -123,10 +123,7 @@ SUPPORTED_RESUME_FORMATS = [".pdf", ".docx", ".txt"]
 JOB_CACHE_HOURS = int(os.getenv("JOB_CACHE_HOURS", "6"))  # How long scraped jobs stay fresh
 CACHE_DIR = os.getenv("CACHE_DIR", "./data/cache")  # Cache directory path
 EMBEDDING_BATCH_WORKERS = int(os.getenv("EMBEDDING_BATCH_WORKERS", "2"))  # Parallel embedding workers
-PLAYWRIGHT_SKIP_BROWSER_INSTALL = (
-    os.getenv("PLAYWRIGHT_SKIP_BROWSER_INSTALL", "false").lower() == "true"
-)
-
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 # Job Matching Settings
 TOP_JOBS_TO_DISPLAY = 50
 MIN_MATCH_SCORE_THRESHOLD = 0  # Temporarily set to 0 to see all jobs and their scores

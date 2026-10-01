@@ -22,5 +22,5 @@ def test_env_example_contains_only_supported_settings():
         "JOB_CACHE_HOURS": "6",
         "CACHE_DIR": "./data/cache",
         "EMBEDDING_BATCH_WORKERS": "2",
-        "PLAYWRIGHT_SKIP_BROWSER_INSTALL": "false",
+        "DATABASE_URL": "",
     }

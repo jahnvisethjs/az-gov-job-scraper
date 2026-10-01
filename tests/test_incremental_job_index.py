@@ -1,5 +1,8 @@
 """Tests for persistent, incremental job embedding updates."""
 
+import pytest
+
+from progress_events import SearchCancelled
 from rag.rag_engine import (
     EMBEDDING_HASH_KEY,
     JobRAG,
@@ -70,10 +73,26 @@ class FakeProvider:
         return embeddings
 
 
-def _rag(collection):
+class FakeJobStore:
+    def __init__(self):
+        self.embeddings = {}
+
+    def load_embeddings(self, content_hashes):
+        return {
+            job_id: embedding
+            for job_id, (content_hash, embedding) in self.embeddings.items()
+            if content_hashes.get(job_id) == content_hash
+        }
+
+    def save_embeddings(self, embeddings):
+        self.embeddings.update(embeddings)
+
+
+def _rag(collection, job_store=None):
     rag = object.__new__(JobRAG)
     rag.collection = collection
     rag.llm_provider = FakeProvider()
+    rag.job_store = job_store or FakeJobStore()
     return rag
 
 
@@ -131,3 +150,49 @@ def test_incremental_index_reuses_embeddings_after_new_rag_instance():
     assert second.embedded == 0
     assert second.unchanged == 1
     assert second_rag.llm_provider.batches == []
+
+
+def test_incremental_index_restores_shared_embedding_without_api_call():
+    job = _job("phoenix-1", "Phoenix", "Engineer")
+    store = FakeJobStore()
+    content_hash = _job_embedding_hash(job)
+    store.embeddings[job["job_id"]] = (content_hash, [0.25, 0.75])
+    rag = _rag(FakeCollection(), store)
+
+    update = rag.add_jobs([job], scope_cities=["Phoenix"])
+
+    assert update.embedded == 0
+    assert update.restored == 1
+    assert rag.llm_provider.batches == []
+    assert rag.collection.records[job["job_id"]]["embedding"] == [0.25, 0.75]
+
+
+def test_cancellation_during_embedding_leaves_existing_index_untouched():
+    stale = _job("tempe-old", "Tempe", "Expired role")
+    existing = _job("tempe-one", "Tempe", "Developer", "Old description")
+    changed = _job("tempe-one", "Tempe", "Developer", "New description")
+    records = {
+        job["job_id"]: {
+            "metadata": {
+                **job,
+                EMBEDDING_HASH_KEY: _job_embedding_hash(job),
+            }
+        }
+        for job in (stale, existing)
+    }
+    collection = FakeCollection(records)
+    rag = _rag(collection)
+
+    class CancelledProvider:
+        def generate_embeddings_batch(self, **kwargs):
+            raise SearchCancelled("cancelled while embedding")
+
+    rag.llm_provider = CancelledProvider()
+
+    with pytest.raises(SearchCancelled):
+        rag.add_jobs([changed], scope_cities=["Tempe"])
+
+    assert set(collection.records) == {stale["job_id"], existing["job_id"]}
+    assert collection.deleted == []
+    assert collection.updated == []
+    assert collection.upserted == []

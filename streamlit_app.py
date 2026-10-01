@@ -1,25 +1,19 @@
 """Streamlit entry point for the Arizona government job matcher."""
 
-import asyncio
 import os
-import sys
 
 import streamlit as st
-
-
-# Playwright requires the proactor loop on Windows. Configure it before the
-# modules that initialize the scraping stack are imported.
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from config import ASU_AI_API_KEY
 from ui import (
     execute_search,
     inject_custom_css,
     render_header,
+    render_partial_results,
     render_profile_section,
     render_results,
     render_resume_section,
+    render_search_activity,
     render_search_controls,
 )
 from utils import init_session_state
@@ -52,6 +46,10 @@ def main() -> None:
     if search_clicked:
         execute_search(api_key, job_title, location)
 
+    if st.session_state.get("search_task_id"):
+        render_search_activity()
+
+    render_partial_results()
     render_results(api_key, min_score, max_jobs)
 
 

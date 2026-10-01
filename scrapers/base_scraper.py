@@ -3,11 +3,12 @@ Base scraper class for government job sites.
 Defines the interface that all platform-specific scrapers must implement.
 """
 from abc import ABC, abstractmethod
-from typing import List,Dict, Optional
+from typing import List, Dict, Optional
 from datetime import datetime
 import asyncio
 
 from job_identity import ensure_job_id
+from progress_events import CancelCheck, SearchCancelled, raise_if_cancelled
 
 
 class JobData:
@@ -81,7 +82,7 @@ class BaseJobScraper(ABC):
     Abstract base class for job scrapers.
     Each platform (NeoGov, PeopleSoft, etc.) should subclass this.
     """
-    
+
     def __init__(self, city_name: str, base_url: str, config: Optional[Dict] = None):
         """
         Initialize scraper.
@@ -95,6 +96,11 @@ class BaseJobScraper(ABC):
         self.base_url = base_url
         self.config = config or {}
         self.jobs: List[JobData] = []
+        self._cancel_check: CancelCheck = None
+
+    def raise_if_cancelled(self) -> None:
+        """Allow scrapers to stop between network or parsing operations."""
+        raise_if_cancelled(self._cancel_check)
     
     @abstractmethod
     async def scrape_jobs(self) -> List[JobData]:
@@ -143,7 +149,11 @@ class BaseJobScraper(ABC):
         """Get scraped jobs as list of dictionaries."""
         return [job.to_dict() for job in self.jobs]
     
-    async def scrape_with_retry(self, max_retries: int = 3) -> List[JobData]:
+    async def scrape_with_retry(
+        self,
+        max_retries: int = 3,
+        cancel_check: CancelCheck = None,
+    ) -> List[JobData]:
         """
         Scrape with retry logic.
         
@@ -153,15 +163,21 @@ class BaseJobScraper(ABC):
         Returns:
             List of JobData objects
         """
+        self._cancel_check = cancel_check
         for attempt in range(max_retries):
+            self.raise_if_cancelled()
             try:
                 self.jobs = await self.scrape_jobs()
+                self.raise_if_cancelled()
                 return self.jobs
+            except SearchCancelled:
+                raise
             except Exception as e:
                 if attempt == max_retries - 1:
                     raise Exception(f"Failed to scrape {self.city_name} after {max_retries} attempts: {e}")
                 print(f"Retry {attempt + 1}/{max_retries} for {self.city_name}: {e}")
                 await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                self.raise_if_cancelled()
         
         return []
 

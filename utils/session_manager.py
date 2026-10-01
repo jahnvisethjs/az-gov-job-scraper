@@ -42,6 +42,21 @@ def init_session_state():
             "error": None
         }
 
+    if "search_task_id" not in st.session_state:
+        st.session_state.search_task_id = None
+
+    if "background_search_error" not in st.session_state:
+        st.session_state.background_search_error = None
+
+    if "results_source" not in st.session_state:
+        st.session_state.results_source = None
+
+    if "partial_jobs" not in st.session_state:
+        st.session_state.partial_jobs = []
+
+    if "partial_results_notice" not in st.session_state:
+        st.session_state.partial_results_notice = None
+
 
 def update_user_profile(
     name: Optional[str] = None,

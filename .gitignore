@@ -58,3 +58,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Local AI collaboration context (intentionally not committed)
+CODEBASE_CONTEXT.md

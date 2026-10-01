@@ -22,6 +22,7 @@ import aiohttp
 import asyncio
 from typing import Callable, List, Dict, Optional
 from config import ASU_AI_API_KEY, ASU_AI_BASE_URL, ASU_AI_MODEL
+from progress_events import CancelCheck, SearchCancelled, raise_if_cancelled
 
 
 class ASUAIProvider:
@@ -211,6 +212,7 @@ class ASUAIProvider:
         dimensions: Optional[int] = 1024,
         max_workers: int = 5,
         progress_callback: Optional[Callable[[int, int], None]] = None,
+        cancel_check: CancelCheck = None,
     ) -> List[List[float]]:
         """
         Generate embeddings for multiple texts in parallel using ThreadPoolExecutor.
@@ -222,6 +224,7 @@ class ASUAIProvider:
             dimensions: Embedding dimensions
             max_workers: Number of parallel workers
             progress_callback: Optional callback receiving completed and total
+            cancel_check: Optional cooperative-cancellation check
             
         Returns:
             List of embedding vectors (same order as input texts)
@@ -230,22 +233,30 @@ class ASUAIProvider:
         
         if not texts:
             return []
+
+        raise_if_cancelled(cancel_check)
         
         def _embed_single(text):
+            raise_if_cancelled(cancel_check)
             return self.generate_embedding(text, model, provider, dimensions)
         
         embeddings = [None] * len(texts)
         
         completed = 0
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+        cancelled = False
+        try:
             future_to_idx = {
                 executor.submit(_embed_single, text): i 
                 for i, text in enumerate(texts)
             }
             for future in concurrent.futures.as_completed(future_to_idx):
+                raise_if_cancelled(cancel_check)
                 idx = future_to_idx[future]
                 try:
                     embeddings[idx] = future.result()
+                except SearchCancelled:
+                    raise
                 except Exception as e:
                     print(f"[ASU AI] Warning: embedding failed for text {idx}: {e}")
                     # Use None as fallback - callers should handle this
@@ -253,6 +264,13 @@ class ASUAIProvider:
                 completed += 1
                 if progress_callback:
                     progress_callback(completed, len(texts))
+        except SearchCancelled:
+            cancelled = True
+            for future in future_to_idx:
+                future.cancel()
+            raise
+        finally:
+            executor.shutdown(wait=not cancelled, cancel_futures=cancelled)
         
         # Replace any None embeddings with zero vectors (same dimension as first valid one)
         valid = next((e for e in embeddings if e is not None), None)
