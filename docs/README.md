@@ -18,3 +18,5 @@ This directory is the single home for maintained project documentation. The root
 - `archive/` is for local historical snapshots only; archived files are not authoritative.
 
 When behavior changes, update the relevant guide in the same pull request.
+
+- [Session embedding reuse and scoring evaluation](scoring-evaluation.md) — item 4 cache behavior, item 5 benchmark, metrics, and calibration status.

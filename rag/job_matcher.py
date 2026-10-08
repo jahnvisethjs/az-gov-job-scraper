@@ -3,6 +3,7 @@ Job Matcher and Tailoring Advisor for personalized job recommendations.
 """
 from typing import Callable, List, Dict, Optional
 from .rag_engine import JobRAG
+from .resume_embedding_cache import ResumeEmbeddingCache
 from scrapers import ScraperRegistry
 import asyncio
 import os
@@ -107,7 +108,8 @@ class JobMatcher:
         cached_only: bool = False,
         catalog_only: bool = False,
         job_title: str = "",
-        location: str = ""
+        location: str = "",
+        resume_embedding_cache: Optional[ResumeEmbeddingCache] = None,
     ) -> List[Dict]:
         """
         Complete workflow: scrape → embed → match → rank.
@@ -349,6 +351,8 @@ class JobMatcher:
         matched_jobs = self.rag_engine.search_jobs(
             search_profile,
             top_k=max(self.rag_engine.get_job_count(), 1),
+            resume_embedding_cache=resume_embedding_cache,
+            cancel_check=cancel_check,
         )
         raise_if_cancelled(cancel_check)
         matched_jobs = [

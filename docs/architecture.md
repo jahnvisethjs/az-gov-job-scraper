@@ -2,7 +2,7 @@
 
 **Maintained system pipeline and architecture documentation**
 
-Last updated: 2026-10-01
+Last updated: 2026-10-08
 
 ---
 
@@ -153,7 +153,9 @@ When `DATABASE_URL` is set, generated vectors are also stored with their content
 prepare_resume_text(profile)
     → "Interests: ...\n\nEducation: ...\n\nSkills: ...\n\nExperience: ..."
     ↓
-ASU AI generate_embedding_sync() → 1024-dim resume vector
+Session-local input/model fingerprint lookup
+    → reuse the cached vector on a hit
+    → ASU AI generate_embedding_sync() on a miss → 1024-dim resume vector
     ↓
 ChromaDB.collection.query(query_embeddings=[resume_vec], n_results=index_size)
     → returns (job_metadata, cosine_distance) pairs
@@ -209,6 +211,7 @@ st.session_state = {
         "resume_filename": str,
         "resume_parsed": Dict    # Set after ASU AI parsing
     },
+    "resume_embedding_cache": ResumeEmbeddingCache,  # Private per-session vector
     "matched_jobs": List[Dict],  # Full ranked results
     "search_task_id": str,       # Active background refresh, if any
     "advice_{job_id}": Dict,     # Cached tailoring advice per job
@@ -262,7 +265,7 @@ Both sync and async variants are implemented. Batch embedding uses `ThreadPoolEx
   - Embeds only new or content-changed jobs
   - Preserves indexed jobs belonging to cities outside the current scope
   - Removes expired jobs within the refreshed scope
-- `search_jobs(profile, top_k)`: embeds resume, queries ChromaDB, applies hybrid scoring
+- `search_jobs(profile, top_k, resume_embedding_cache=...)`: reuses a session-local resume vector, queries ChromaDB, applies hybrid scoring
 - `clear_jobs()`: drops and recreates ChromaDB collection
 
 **Scoring formula:**
@@ -427,7 +430,7 @@ current refresh.
 
 ### Parallel Scraping
 `JobMatcher.match_jobs_to_profile()` separates cities into cached vs stale.
-Stale cities are scraped concurrently with `asyncio.gather()` bounded by `asyncio.Semaphore(3)` — maximum 3 headless browser instances at a time.
+Stale cities are scraped concurrently with `asyncio.gather()` bounded by `asyncio.Semaphore(3)` — maximum 3 city HTTP scrapes at a time.
 
 ```python
 semaphore = asyncio.Semaphore(3)
@@ -509,3 +512,12 @@ handles the scraping/cache decision and delegates vector operations to
 | `VECTOR_DB_PATH` | `./chroma_db` | ChromaDB persistence path |
 | `MIN_MATCH_SCORE_THRESHOLD` | `0` | Filter threshold (0 = show all) |
 | `TOP_JOBS_TO_DISPLAY` | `50` | Max results from RAG search |
+
+## Session embedding cache and scoring evaluation
+
+Resume vectors are reused between saved-results ranking and live refresh within
+one session. Profile/search/model changes invalidate reuse; vectors and keys are
+never persisted in shared job storage. Runtime scoring and the evaluation CLI
+share `matching_scoring.py`. See [scoring-evaluation.md](scoring-evaluation.md)
+for cache behavior, the synthetic benchmark, measured feature collection,
+offline replay, current results, and the remaining calibration work.

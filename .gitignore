@@ -61,3 +61,6 @@ Thumbs.db
 
 # Local AI collaboration context (intentionally not committed)
 CODEBASE_CONTEXT.md
+
+# Generated evaluation features/reports (may be based on private local datasets)
+data/evaluation/

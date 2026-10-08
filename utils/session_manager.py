@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 from job_identity import deduplicate_jobs
+from rag.resume_embedding_cache import ResumeEmbeddingCache
 
 
 _UNSET = object()
@@ -15,6 +16,9 @@ _UNSET = object()
 def init_session_state():
     """Initialize all session state variables if they don't exist."""
     
+    if "resume_embedding_cache" not in st.session_state:
+        st.session_state.resume_embedding_cache = ResumeEmbeddingCache()
+
     if "user_profile" not in st.session_state:
         st.session_state.user_profile = {
             "name": "",
@@ -77,6 +81,20 @@ def update_user_profile(
         resume_filename: Original resume filename
         resume_parsed: Parsed resume data from AI
     """
+    embedding_changes = {
+        "degree": degree, "interests": interests, "resume_text": resume_text,
+    }
+    if resume_parsed is not _UNSET:
+        embedding_changes["resume_parsed"] = resume_parsed
+    if any(
+        (value is not None or key == "resume_parsed")
+        and value != st.session_state.user_profile.get(key)
+        for key, value in embedding_changes.items()
+    ):
+        cache = st.session_state.get("resume_embedding_cache")
+        if cache is not None:
+            cache.clear()
+
     if name is not None:
         st.session_state.user_profile["name"] = name
     if degree is not None:
@@ -179,6 +197,9 @@ def is_processing() -> bool:
 
 def clear_session():
     """Clear all session state (for logout/reset)."""
+    cache = st.session_state.get("resume_embedding_cache")
+    if cache is not None:
+        cache.clear()
     for key in list(st.session_state.keys()):
         del st.session_state[key]
     init_session_state()

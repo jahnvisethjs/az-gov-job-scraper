@@ -216,6 +216,7 @@ def execute_search(api_key: str, job_title: str, location: str) -> None:
         "cities": ScraperRegistry.get_supported_cities(),
         "job_title": job_title,
         "location": location,
+        "resume_embedding_cache": st.session_state.resume_embedding_cache,
     }
 
     # This pass never opens a browser. It ranks the latest saved catalog so a

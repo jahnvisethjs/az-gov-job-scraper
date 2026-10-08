@@ -12,6 +12,7 @@ from progress_events import (
     raise_if_cancelled,
 )
 from rag.job_matcher import JobMatcher
+from rag.resume_embedding_cache import ResumeEmbeddingCache
 
 
 ProgressCallback = Optional[Callable[[SearchProgress], None]]
@@ -31,6 +32,7 @@ def run_job_search(
     progress_callback: ProgressCallback = None,
     partial_results_callback: PartialResultsCallback = None,
     cancel_check: CancelCheck = None,
+    resume_embedding_cache: Optional[ResumeEmbeddingCache] = None,
 ) -> List[Dict]:
     """Run the async matcher without coupling it to Streamlit.
 
@@ -68,6 +70,7 @@ def run_job_search(
                         publish_partial if partial_results_callback else None
                     ),
                     cancel_check=cancel_check,
+                    resume_embedding_cache=resume_embedding_cache,
                     force_refresh=force_refresh,
                     cached_only=cached_only,
                     catalog_only=catalog_only,

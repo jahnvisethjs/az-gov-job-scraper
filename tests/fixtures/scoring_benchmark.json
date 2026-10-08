@@ -1,0 +1,658 @@
+{
+  "schema_version": 1,
+  "name": "synthetic-arizona-municipal-v1",
+  "label_source": "Assistant-authored synthetic relevance judgments; not independently reviewed, not hiring outcomes.",
+  "grade_rubric": {
+    "0": "Unrelated or no demonstrated qualification fit",
+    "1": "Weak/adjacent fit or substantial required qualification gap",
+    "2": "Plausible transferable fit",
+    "3": "Strong duties and stated qualification fit"
+  },
+  "limitations": [
+    "Small synthetic diagnostic set, not representative of the population.",
+    "Labels need independent human review before weight selection.",
+    "Explicit seniority, missing credentials, negation and keyword bait are included as challenge cases."
+  ],
+  "profiles": [
+    {
+      "id": "junior_analyst",
+      "category": "entry_level_analytics",
+      "degree": "BSc Statistics",
+      "interests": [
+        "data analysis"
+      ],
+      "resume_parsed": {
+        "skills": [
+          "Python",
+          "SQL",
+          "Excel"
+        ],
+        "experience": [
+          {
+            "title": "Analytics Intern",
+            "company": "Synthetic Department",
+            "description": "Six months building SQL queries and Python dashboards for spending reports."
+          }
+        ]
+      }
+    },
+    {
+      "id": "support",
+      "category": "technology_support",
+      "degree": "Associate Information Technology",
+      "interests": [
+        "customer service"
+      ],
+      "resume_parsed": {
+        "skills": [
+          "Windows",
+          "troubleshooting",
+          "network connectivity"
+        ],
+        "experience": [
+          {
+            "title": "Help Desk Technician",
+            "company": "Synthetic Department",
+            "description": "Two years resolving employee tickets and Windows connectivity issues."
+          }
+        ]
+      }
+    },
+    {
+      "id": "office",
+      "category": "unparsed_resume",
+      "degree": "High School",
+      "interests": [
+        "customer service"
+      ],
+      "resume_text": "Synthetic candidate: three years office scheduling, data entry, answering phones, and helping residents.",
+      "resume_parsed": null
+    },
+    {
+      "id": "accounting",
+      "category": "finance_seniority",
+      "degree": "BSc Accounting",
+      "interests": [
+        "governmental accounting"
+      ],
+      "resume_parsed": {
+        "skills": [
+          "reconciliation",
+          "Excel",
+          "financial statements"
+        ],
+        "experience": [
+          {
+            "title": "Accountant",
+            "company": "Synthetic Department",
+            "description": "Three years reconciling municipal accounts and preparing financial statements. No supervisory experience or CPA credential."
+          }
+        ]
+      }
+    },
+    {
+      "id": "civil",
+      "category": "mandatory_credentials",
+      "degree": "BSc Civil Engineering",
+      "interests": [
+        "infrastructure"
+      ],
+      "resume_parsed": {
+        "skills": [
+          "AutoCAD",
+          "drainage",
+          "Engineer in Training"
+        ],
+        "experience": [
+          {
+            "title": "Engineering Intern",
+            "company": "Synthetic Department",
+            "description": "One year road design and drainage calculations. Engineer in Training certified; no Professional Engineer license."
+          }
+        ]
+      }
+    },
+    {
+      "id": "community",
+      "category": "community_programs",
+      "degree": "BA Recreation Management",
+      "interests": [
+        "community recreation"
+      ],
+      "resume_parsed": {
+        "skills": [
+          "event planning",
+          "customer service",
+          "volunteer coordination"
+        ],
+        "experience": [
+          {
+            "title": "Program Assistant",
+            "company": "Synthetic Department",
+            "description": "Three years organizing community events, recreation activities and volunteers."
+          }
+        ]
+      }
+    }
+  ],
+  "jobs": [
+    {
+      "id": "data_analyst",
+      "title": "Budget Data Analyst",
+      "description": "Analyze municipal spending, build SQL queries and Python dashboards, and explain data to departments.",
+      "requirements": "Bachelor degree; SQL, Python, data analysis and Excel.",
+      "city": "Phoenix"
+    },
+    {
+      "id": "senior_data",
+      "title": "Senior Data Science Manager",
+      "description": "Lead an analytics team, manage budgets and develop machine learning strategy.",
+      "requirements": "Eight years of analytics experience; three years supervising staff; Python and SQL.",
+      "city": "Tempe"
+    },
+    {
+      "id": "it_support",
+      "title": "IT Support Technician",
+      "description": "Resolve help desk tickets, troubleshoot Windows devices and assist employees.",
+      "requirements": "One year troubleshooting Windows and network connectivity; customer service.",
+      "city": "Mesa"
+    },
+    {
+      "id": "network_engineer",
+      "title": "Network Engineer",
+      "description": "Design enterprise networks, configure routers and maintain firewall security.",
+      "requirements": "Five years network engineering experience and CCNP certification.",
+      "city": "Phoenix"
+    },
+    {
+      "id": "office_assistant",
+      "title": "Office Assistant",
+      "description": "Answer phones, schedule appointments, enter records and assist residents.",
+      "requirements": "Office experience, scheduling, data entry and customer service.",
+      "city": "Tempe"
+    },
+    {
+      "id": "accountant",
+      "title": "Municipal Accountant",
+      "description": "Reconcile accounts, prepare financial statements and maintain the general ledger.",
+      "requirements": "Accounting degree; two years reconciliation and Excel experience.",
+      "city": "Phoenix"
+    },
+    {
+      "id": "finance_director",
+      "title": "Finance Director",
+      "description": "Lead the finance department, oversee municipal budgets and supervise accounting staff.",
+      "requirements": "Ten years governmental accounting and five years management; CPA required.",
+      "city": "Mesa"
+    },
+    {
+      "id": "civil_junior",
+      "title": "Civil Engineering Associate",
+      "description": "Assist with road design, drainage calculations and construction inspections.",
+      "requirements": "Civil engineering degree; AutoCAD; Engineer in Training certification.",
+      "city": "Tempe"
+    },
+    {
+      "id": "civil_senior",
+      "title": "Senior Civil Engineer",
+      "description": "Approve infrastructure designs, supervise engineers and oversee capital projects.",
+      "requirements": "Arizona Professional Engineer license and seven years design experience required.",
+      "city": "Phoenix"
+    },
+    {
+      "id": "recreation",
+      "title": "Recreation Program Coordinator",
+      "description": "Plan community recreation programs, organize events and coordinate volunteers.",
+      "requirements": "Two years community program experience; event planning and customer service.",
+      "city": "Mesa"
+    },
+    {
+      "id": "police",
+      "title": "Police Officer",
+      "description": "Patrol assigned areas, respond to emergencies and enforce laws.",
+      "requirements": "Arizona POST certification, physical fitness assessment and law enforcement training.",
+      "city": "Phoenix"
+    },
+    {
+      "id": "sql_false_positive",
+      "title": "Administrative Assistant",
+      "description": "Compile requests for SQL and Python training; advanced programming experience is not required. Provide scheduling and data entry support.",
+      "requirements": "Office administration and customer service. No data analysis responsibilities.",
+      "city": "Tempe"
+    }
+  ],
+  "relevance": [
+    {
+      "profile_id": "junior_analyst",
+      "job_id": "data_analyst",
+      "grade": 3,
+      "rationale": "Strong skills and education fit for an analyst role."
+    },
+    {
+      "profile_id": "junior_analyst",
+      "job_id": "senior_data",
+      "grade": 1,
+      "rationale": "Related technical skills but lacks required experience and management."
+    },
+    {
+      "profile_id": "junior_analyst",
+      "job_id": "it_support",
+      "grade": 1,
+      "rationale": "Some transferable skills; substantial experience or duty gaps."
+    },
+    {
+      "profile_id": "junior_analyst",
+      "job_id": "network_engineer",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "junior_analyst",
+      "job_id": "office_assistant",
+      "grade": 1,
+      "rationale": "Some transferable skills; substantial experience or duty gaps."
+    },
+    {
+      "profile_id": "junior_analyst",
+      "job_id": "accountant",
+      "grade": 1,
+      "rationale": "Some transferable skills; substantial experience or duty gaps."
+    },
+    {
+      "profile_id": "junior_analyst",
+      "job_id": "finance_director",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "junior_analyst",
+      "job_id": "civil_junior",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "junior_analyst",
+      "job_id": "civil_senior",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "junior_analyst",
+      "job_id": "recreation",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "junior_analyst",
+      "job_id": "police",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "junior_analyst",
+      "job_id": "sql_false_positive",
+      "grade": 1,
+      "rationale": "Mentions candidate skills but actual duties are administrative."
+    },
+    {
+      "profile_id": "support",
+      "job_id": "data_analyst",
+      "grade": 1,
+      "rationale": "Some transferable skills; substantial experience or duty gaps."
+    },
+    {
+      "profile_id": "support",
+      "job_id": "senior_data",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "support",
+      "job_id": "it_support",
+      "grade": 3,
+      "rationale": "Direct experience match."
+    },
+    {
+      "profile_id": "support",
+      "job_id": "network_engineer",
+      "grade": 1,
+      "rationale": "Related field but lacks required engineering experience and CCNP."
+    },
+    {
+      "profile_id": "support",
+      "job_id": "office_assistant",
+      "grade": 1,
+      "rationale": "Some transferable skills; substantial experience or duty gaps."
+    },
+    {
+      "profile_id": "support",
+      "job_id": "accountant",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "support",
+      "job_id": "finance_director",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "support",
+      "job_id": "civil_junior",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "support",
+      "job_id": "civil_senior",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "support",
+      "job_id": "recreation",
+      "grade": 1,
+      "rationale": "Some transferable skills; substantial experience or duty gaps."
+    },
+    {
+      "profile_id": "support",
+      "job_id": "police",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "support",
+      "job_id": "sql_false_positive",
+      "grade": 1,
+      "rationale": "Some transferable skills; substantial experience or duty gaps."
+    },
+    {
+      "profile_id": "office",
+      "job_id": "data_analyst",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "office",
+      "job_id": "senior_data",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "office",
+      "job_id": "it_support",
+      "grade": 1,
+      "rationale": "Some transferable skills; substantial experience or duty gaps."
+    },
+    {
+      "profile_id": "office",
+      "job_id": "network_engineer",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "office",
+      "job_id": "office_assistant",
+      "grade": 3,
+      "rationale": "Direct office support experience."
+    },
+    {
+      "profile_id": "office",
+      "job_id": "accountant",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "office",
+      "job_id": "finance_director",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "office",
+      "job_id": "civil_junior",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "office",
+      "job_id": "civil_senior",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "office",
+      "job_id": "recreation",
+      "grade": 1,
+      "rationale": "Some transferable skills; substantial experience or duty gaps."
+    },
+    {
+      "profile_id": "office",
+      "job_id": "police",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "office",
+      "job_id": "sql_false_positive",
+      "grade": 3,
+      "rationale": "Administrative duties fit despite programming keywords."
+    },
+    {
+      "profile_id": "accounting",
+      "job_id": "data_analyst",
+      "grade": 2,
+      "rationale": "Transferable experience fits several duties."
+    },
+    {
+      "profile_id": "accounting",
+      "job_id": "senior_data",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "accounting",
+      "job_id": "it_support",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "accounting",
+      "job_id": "network_engineer",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "accounting",
+      "job_id": "office_assistant",
+      "grade": 1,
+      "rationale": "Some transferable skills; substantial experience or duty gaps."
+    },
+    {
+      "profile_id": "accounting",
+      "job_id": "accountant",
+      "grade": 3,
+      "rationale": "Direct accounting experience and degree fit."
+    },
+    {
+      "profile_id": "accounting",
+      "job_id": "finance_director",
+      "grade": 1,
+      "rationale": "Related domain but lacks CPA and management requirements."
+    },
+    {
+      "profile_id": "accounting",
+      "job_id": "civil_junior",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "accounting",
+      "job_id": "civil_senior",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "accounting",
+      "job_id": "recreation",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "accounting",
+      "job_id": "police",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "accounting",
+      "job_id": "sql_false_positive",
+      "grade": 1,
+      "rationale": "Some transferable skills; substantial experience or duty gaps."
+    },
+    {
+      "profile_id": "civil",
+      "job_id": "data_analyst",
+      "grade": 1,
+      "rationale": "Some transferable skills; substantial experience or duty gaps."
+    },
+    {
+      "profile_id": "civil",
+      "job_id": "senior_data",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "civil",
+      "job_id": "it_support",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "civil",
+      "job_id": "network_engineer",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "civil",
+      "job_id": "office_assistant",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "civil",
+      "job_id": "accountant",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "civil",
+      "job_id": "finance_director",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "civil",
+      "job_id": "civil_junior",
+      "grade": 3,
+      "rationale": "Degree, tools and EIT match."
+    },
+    {
+      "profile_id": "civil",
+      "job_id": "civil_senior",
+      "grade": 1,
+      "rationale": "Related domain but missing required PE license and years."
+    },
+    {
+      "profile_id": "civil",
+      "job_id": "recreation",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "civil",
+      "job_id": "police",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "civil",
+      "job_id": "sql_false_positive",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "community",
+      "job_id": "data_analyst",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "community",
+      "job_id": "senior_data",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "community",
+      "job_id": "it_support",
+      "grade": 1,
+      "rationale": "Some transferable skills; substantial experience or duty gaps."
+    },
+    {
+      "profile_id": "community",
+      "job_id": "network_engineer",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "community",
+      "job_id": "office_assistant",
+      "grade": 2,
+      "rationale": "Transferable experience fits several duties."
+    },
+    {
+      "profile_id": "community",
+      "job_id": "accountant",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "community",
+      "job_id": "finance_director",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "community",
+      "job_id": "civil_junior",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "community",
+      "job_id": "civil_senior",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "community",
+      "job_id": "recreation",
+      "grade": 3,
+      "rationale": "Direct program experience and skills fit."
+    },
+    {
+      "profile_id": "community",
+      "job_id": "police",
+      "grade": 0,
+      "rationale": "No demonstrated role or credential fit."
+    },
+    {
+      "profile_id": "community",
+      "job_id": "sql_false_positive",
+      "grade": 2,
+      "rationale": "Transferable experience fits several duties."
+    }
+  ]
+}

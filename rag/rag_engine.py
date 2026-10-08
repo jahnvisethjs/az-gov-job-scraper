@@ -25,140 +25,13 @@ from rag.asu_ai_provider import ASUAIProvider
 from job_identity import deduplicate_jobs
 from progress_events import CancelCheck, raise_if_cancelled
 from storage import get_job_store
-
-
-def prepare_job_text(job: Dict) -> str:
-    """
-    Prepare job data for embedding by combining key fields.
-    
-    Args:
-        job: Job dictionary with title, description, requirements, etc.
-        
-    Returns:
-        Formatted text for embedding
-    """
-    parts = []
-
-    if job.get("title"):
-        parts.append(f"Title: {job['title']}")
-    
-    if job.get("department"):
-        parts.append(f"Department: {job['department']}")
-
-    if job.get("location") or job.get("city"):
-        parts.append(f"Location: {job.get('location') or job.get('city')}")
-    
-    if job.get("description"):
-        parts.append(f"Description: {job['description']}")
-    
-    if job.get("requirements"):
-        parts.append(f"Requirements: {job['requirements']}")
-    
-    if job.get("job_type"):
-        parts.append(f"Type: {job['job_type']}")
-    
-    return "\n\n".join(parts)
-
-
-def prepare_resume_text(profile: Dict) -> str:
-    """
-    Prepare resume/profile data for embedding.
-    
-    Args:
-        profile: User profile with resume_parsed data
-        
-    Returns:
-        Formatted text for embedding
-    """
-    parts = []
-
-    if profile.get("target_job_title"):
-        parts.append(f"Target role: {profile['target_job_title']}")
-
-    if profile.get("target_location"):
-        parts.append(f"Preferred location: {profile['target_location']}")
-    
-    # Add interests
-    if profile.get("interests"):
-        parts.append(f"Interests: {', '.join(profile['interests'])}")
-    
-    # Add education
-    if profile.get("degree"):
-        parts.append(f"Education: {profile['degree']}")
-    
-    # Parse resume data
-    resume_data = profile.get("resume_parsed", {})
-    
-    # Add skills
-    if resume_data.get("skills"):
-        parts.append(f"Skills: {', '.join(resume_data['skills'])}")
-    
-    # Add experience
-    if resume_data.get("experience"):
-        exp_texts = []
-        for exp in resume_data["experience"]:
-            exp_text = f"{exp.get('title', '')} at {exp.get('company', '')}"
-            if exp.get("description"):
-                exp_text += f": {exp['description']}"
-            exp_texts.append(exp_text)
-        parts.append(f"Experience:\n" + "\n".join(exp_texts))
-    
-    # Add education details
-    if resume_data.get("education"):
-        edu_texts = []
-        for edu in resume_data["education"]:
-            edu_text = f"{edu.get('degree', '')} in {edu.get('field', '')} from {edu.get('institution', '')}"
-            edu_texts.append(edu_text)
-        parts.append(f"Education Details:\n" + "\n".join(edu_texts))
-    
-    # Add projects
-    if resume_data.get("projects"):
-        proj_texts = []
-        for proj in resume_data["projects"]:
-            proj_text = f"{proj.get('name', '')}: {proj.get('description', '')}"
-            if proj.get("technologies"):
-                proj_text += f" (Technologies: {', '.join(proj['technologies'])})"
-            proj_texts.append(proj_text)
-        parts.append(f"Projects:\n" + "\n".join(proj_texts))
-    
-    return "\n\n".join(parts)
-
-
-def calculate_keyword_overlap(job: Dict, profile: Dict) -> float:
-    """
-    Calculate keyword overlap score between job and resume.
-    
-    Args:
-        job: Job dictionary
-        profile: User profile dictionary
-        
-    Returns:
-        Keyword overlap score (0.0 to 1.0)
-    """
-    # Extract keywords from job
-    job_text = f"{job.get('title', '')} {job.get('description', '')} {job.get('requirements', '')}".lower()
-    
-    # Extract keywords from profile
-    resume_data = profile.get("resume_parsed", {})
-    profile_keywords = set()
-    
-    # Add skills as keywords
-    if resume_data.get("skills"):
-        profile_keywords.update([s.lower() for s in resume_data["skills"]])
-    
-    # Add interests
-    if profile.get("interests"):
-        profile_keywords.update([i.lower() for i in profile["interests"]])
-    
-    # Simple keyword matching
-    total_keywords = len(profile_keywords)
-    
-    if total_keywords == 0:
-        return 0.0
-    
-    matches = sum(1 for keyword in profile_keywords if keyword in job_text)
-    
-    return matches / total_keywords
+from matching_scoring import (
+    calculate_keyword_overlap,
+    combine_match_score,
+    prepare_job_text,
+    prepare_resume_text,
+)
+from rag.resume_embedding_cache import ResumeEmbeddingCache
 
 
 EMBEDDING_HASH_KEY = "_embedding_content_hash"
@@ -399,7 +272,10 @@ class JobRAG:
     def search_jobs(
         self,
         profile: Dict,
-        top_k: int = 50
+        top_k: int = 50,
+        *,
+        resume_embedding_cache: Optional[ResumeEmbeddingCache] = None,
+        cancel_check: CancelCheck = None,
     ) -> List[Tuple[Dict, float]]:
         """
         Search for matching jobs using semantic similarity.
@@ -411,11 +287,22 @@ class JobRAG:
         Returns:
             List of (job_dict, score) tuples sorted by score
         """
+        raise_if_cancelled(cancel_check)
         # Prepare resume text for embedding
         resume_text = prepare_resume_text(profile)
         
         # Generate embedding for resume
-        resume_embedding = self.generate_embedding_sync(resume_text)
+        if resume_embedding_cache is None:
+            resume_embedding = self.generate_embedding_sync(resume_text)
+        else:
+            resume_embedding = resume_embedding_cache.get_or_create(
+                resume_text,
+                configuration=(ASU_AI_BASE_URL, ASU_AI_EMBEDDINGS_PROVIDER,
+                               ASU_AI_EMBEDDINGS_MODEL, ASU_AI_EMBEDDINGS_DIMENSIONS),
+                create=lambda: self.generate_embedding_sync(resume_text),
+                cancel_check=cancel_check,
+            )
+        raise_if_cancelled(cancel_check)
         
         # Query ChromaDB
         results = self.collection.query(
@@ -440,10 +327,7 @@ class JobRAG:
                 keyword_score = calculate_keyword_overlap(job_metadata, profile)
                 
                 # Combined score: 70% semantic, 30% keyword
-                final_score = (0.7 * semantic_similarity) + (0.3 * keyword_score)
-                
-                # Convert to 0-100 scale
-                final_score = final_score * 100
+                final_score = combine_match_score(semantic_similarity, keyword_score)
                 
                 matched_jobs.append((job_metadata, final_score))
         
